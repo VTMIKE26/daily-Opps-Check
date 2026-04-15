@@ -46,815 +46,156 @@ HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# PEREGRINE FIT PROFILE
-# ---------------------------------------------------------------------------
-HIGH_VALUE_KEYWORDS = [
-    # Core mission — law enforcement
-    "federated search", "enterprise search", "investigative platform",
-    "law enforcement analytics", "crime gun intelligence", "CGIC",
-    "NIBIN", "eTrace", "gun violence", "ballistic intelligence",
-    "investigative workflow", "intelligence platform",
-    # Palantir replacement signals — HIGH priority
-    "Palantir", "Gotham", "Foundry", "alternative to Palantir",
-    "replace Palantir", "Palantir replacement", "data platform modernization",
-    "legacy data platform", "platform consolidation", "enterprise data platform",
-    "data platform migration", "incumbent replacement",
-    # General data integration — broad federal market
-    "data integration platform", "data fusion", "data ingestion",
-    "enterprise data integration", "data unification", "unified data environment",
-    "data silo", "siloed systems", "disparate data sources",
-    "multi-source data", "data harmonization", "data normalization",
-    "master data management", "MDM",
-    # Entity & record capabilities
-    "entity resolution", "record deduplication", "record linkage",
-    "ontology", "knowledge graph", "link analysis",
-    "graph analytics", "relationship mapping",
-    # Analytics & visualization
-    "geospatial analysis", "geospatial intelligence", "GEOINT",
-    "situational awareness", "real-time dashboard", "operational dashboard",
-    "temporal analysis", "proactive alerting", "geofence",
-    "heat map", "predictive analytics", "advanced analytics",
-    # Security & compliance
-    "CJIS", "AWS GovCloud", "FedRAMP High", "FedRAMP Moderate",
-    "NIST SP 800-53", "ICAM", "SAML", "SSO",
-    "zero trust", "Section 508", "role-based access", "attribute-based access",
-    # Public safety operations
-    "records management system", "RMS", "CAD", "computer-aided dispatch",
-    "public safety", "first responder", "operational intelligence",
-    # Agency-specific — ATF
-    "ATF", "Bureau of Alcohol Tobacco", "crime gun", "NIBIN lead", "trace data",
-    # Corrections & supervision
-    "community supervision", "probation", "parole", "reentry",
-    "corrections", "offender management", "supervision officer",
-    "court services", "pretrial", "case supervision",
-    "Smart21", "CSOSA", "supervision data",
-    # Platform capabilities
-    "OCR", "optical character recognition", "document intelligence",
-    "walk-up usable", "mobile application", "biometric authentication",
-    # Intelligence community / defense data
-    "all-source analytics", "multi-INT", "intelligence fusion",
-    "targeting platform", "mission data", "operational data environment",
-    "common operating picture", "COP", "command and control",
-]
-
-MEDIUM_VALUE_KEYWORDS = [
-    # General tech
-    "SaaS", "software as a service", "enterprise platform",
-    "data analytics", "data management", "interoperability",
-    "API integration", "cloud platform", "digital transformation",
-    "IT modernization", "legacy modernization", "dashboard", "visualization",
-    # AI/ML
-    "artificial intelligence", "machine learning", "AI/ML",
-    "natural language processing", "NLP", "predictive analytics",
-    "automation", "anomaly detection", "generative AI", "large language model",
-    # Data platform signals
-    "data lake", "data warehouse", "ETL", "ELT", "data pipeline",
-    "data fabric", "data mesh", "data catalog", "metadata management",
-    "data governance", "data quality", "data lineage",
-    "cloud migration", "hybrid cloud", "multi-cloud",
-    # Law enforcement adjacent
-    "law enforcement", "public safety", "criminal justice",
-    "emergency management", "homeland security", "intelligence",
-    "investigative", "surveillance", "gang", "violent crime",
-    "body camera", "evidence management", "digital evidence",
-    # Agencies (non-ATF)
-    "DOJ", "FBI", "DEA", "Marshal", "CBP", "ICE", "TSA",
-    "DHS", "DoD", "Army", "Navy", "Air Force", "ODNI",
-    "FEMA", "police department", "sheriff", "state police",
-    # Contract vehicles
-    "NASA SEWP", "SEWP", "GSA Schedule", "small business set-aside",
-    "8(a)", "HUBZone", "SDVOSB", "WOSB",
-    # Corrections/justice
-    "justice system", "recidivism", "social services", "reintegration",
-    "court order", "supervision program", "offender",
-    # Data infrastructure
-    "data model", "SharePoint", "SQL database", "file share",
-    "near real time", "audit log", "retention policy",
-    "commercial item", "annual subscription",
-    # Competitors / market signals
-    "Palantir alternative", "IBM i2", "Esri", "Tableau",
-    "data visualization platform", "analytics platform",
-]
-
-NEGATIVE_KEYWORDS = [
-    "construction", "HVAC", "janitorial", "landscaping", "food service",
-    "furniture", "vehicle maintenance", "facilities management", "printing",
-    "audio visual installation", "base operations", "custodial",
-    "grounds maintenance", "pest control", "generator", "electrical install",
-    "medical supply", "pharmaceutical", "staffing agency", "temp staff",
-    "office supplies", "clothing", "uniform", "laundry", "refuse",
-    "aircraft maintenance", "ship repair", "ammunition supply",
-]
-
-NAICS_CODES = [
-    "513210",  # Software Publishers — Peregrine's primary NAICS
-    "541511",  # Custom Computer Programming Services
-    "541512",  # Computer Systems Design Services
-    "541519",  # Other Computer Related Services
-    "518210",  # Data Processing, Hosting, and Related Services
-    "541690",  # Other Scientific and Technical Consulting
-    "541715",  # R&D in Physical, Engineering, and Life Sciences
-    "541614",  # Process, Physical Distribution, and Logistics Consulting
-    "519130",  # Internet Publishing and Web Search Portals
-    "561611",  # Investigation Services
-    "561621",  # Security Systems Services
-    "923120",  # Administration of Public Health Programs
-    "922150",  # Parole Offices and Probation Offices
-    "922110",  # Courts
-    "922120",  # Police Protection
-    "922190",  # Other Justice, Public Order, and Safety Activities
-]
-
-TARGET_AGENCIES = [
-    # Tier 1 — active relationships / RFIs submitted
-    "Bureau of Alcohol, Tobacco, Firearms", "ATF",
-    "Department of Justice", "DOJ",
-    "Federal Bureau of Investigation", "FBI",
-    "Drug Enforcement Administration", "DEA",
-    "U.S. Marshals", "USMS",
-    "Court Services and Offender Supervision", "CSOSA",
-    # Tier 2 — law enforcement / intelligence / border
-    "Department of Homeland Security", "DHS",
-    "Customs and Border Protection", "CBP",
-    "Immigration and Customs Enforcement", "ICE",
-    "Secret Service", "USSS",
-    "Transportation Security Administration", "TSA",
-    "Office of the Director of National Intelligence", "ODNI",
-    "Defense Intelligence Agency", "DIA",
-    "National Security Agency", "NSA",
-    "Central Intelligence Agency", "CIA",
-    # Tier 3 — corrections, justice, social services
-    "Pretrial Services Agency", "PSA",
-    "Bureau of Prisons", "BOP",
-    "Office of Justice Programs", "OJP",
-    "National Institute of Justice", "NIJ",
-    "Office of Juvenile Justice", "OJJDP",
-    "Office of National Drug Control", "ONDCP",
-    # Tier 4 — DoD / defense data consumers
-    "Department of Defense", "DoD",
-    "Department of the Army", "Department of the Navy",
-    "Department of the Air Force", "Space Force",
-    "Defense Advanced Research Projects", "DARPA",
-    "Special Operations Command", "SOCOM",
-    "U.S. Northern Command", "NORTHCOM",
-    # Tier 5 — broader federal data platform buyers
-    "Federal Emergency Management Agency", "FEMA",
-    "General Services Administration", "GSA",
-    "Department of Health and Human Services", "HHS",
-    "Centers for Disease Control", "CDC",
-    "Social Security Administration", "SSA",
-    "Department of Veterans Affairs", "VA",
-    "Department of State",
-    "Department of the Treasury",
-    # State / local
-    "police department", "sheriff", "state police",
-    "public safety", "law enforcement agency",
-    "probation", "parole", "corrections", "supervision agency",
-]
-
-# ---------------------------------------------------------------------------
-# DATA CLASS
-# ---------------------------------------------------------------------------
-@dataclass
-class Opportunity:
-    title: str
-    notice_id: str
-    agency: str
-    posted_date: str
-    response_date: str
-    description: str
-    url: str
-    opp_type: str
-    source: str          # "SAM.gov", "Federal Register", "USASpending", etc.
-    naics: str = ""
-    score: int = 0
-    score_reasons: list = field(default_factory=list)
-    tier: str = ""
-
-# ---------------------------------------------------------------------------
-# DATE UTILITIES
-# ---------------------------------------------------------------------------
-def parse_date_flexible(date_str: str) -> datetime | None:
-    """Try multiple date formats and return a datetime or None."""
-    if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
-        return None
-    formats = [
-        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y",
-        "%b %d, %Y", "%d %b %Y",
-    ]
-    clean = date_str.strip()[:25]
-    for fmt in formats:
-        try:
-            return datetime.strptime(clean, fmt).replace(tzinfo=None)
-        except ValueError:
-            continue
-    return None
-
-def is_expired(opp: "Opportunity") -> bool:
-    """
-    Return True if the response deadline has clearly passed.
-    We use a 2-day grace buffer to avoid timezone edge cases.
-    If no deadline is parseable we keep the opportunity (err on side of inclusion).
-    """
-    today = datetime.utcnow()
-    grace = today - timedelta(days=2)
-
-    # Try response_date first, then posted_date as fallback
-    for date_str in [opp.response_date, opp.posted_date]:
-        dt = parse_date_flexible(date_str)
-        if dt:
-            return dt < grace
-    return False  # Can't determine — keep it
-
-
-# ---------------------------------------------------------------------------
-# CAPABILITY-BASED SCORING ENGINE
+# PEREGRINE CORE CAPABILITIES (grounded in actual product)
 #
-# Peregrine's core capabilities (what it actually does):
-#   1. Data Integration & Unification  — connect siloed systems into one environment
-#   2. Investigative / Operational Analytics — search, link analysis, geospatial, dashboards
-#   3. Federated Search — query across internal + external sources simultaneously
-#   4. Entity Resolution & Deduplication — patented record merging across systems
-#   5. Secure SaaS Platform — FedRAMP, CJIS, AWS GovCloud, NIST SP 800-53
-#   6. Public Safety / Law Enforcement — RMS, CAD, NIBIN, eTrace, crime gun intelligence
-#   7. Corrections & Supervision — probation, parole, offender management, CSOSA
-#   8. Palantir / Legacy Platform Replacement — enterprise intelligence modernization
-#
-# Scoring is CAPABILITY-MATCH driven, not keyword-spray:
-#   - Each capability has a cluster of specific, meaningful phrases
-#   - A hit in a cluster scores once for that cluster (no double-counting spray)
-#   - A NAICS match alone scores 0 — it must co-occur with capability signals
-#   - Hard exclusions for clearly irrelevant work
+# Peregrine is a secure enterprise data integration and intelligence platform
+# purpose-built for law enforcement, public safety, and corrections agencies.
+# It does NOT provide: hardware, staffing, maintenance, construction, or
+# general IT helpdesk. It IS: a SaaS data platform with analytics.
 # ---------------------------------------------------------------------------
 
-# Each capability cluster: (capability_name, points_if_matched, [phrases])
-# Phrases are SHORT and broad — matching how agencies actually write solicitations.
+# Peregrine's 6 core capability areas — what it actually sells and deploys
 CAPABILITY_CLUSTERS = [
     (
-        "Data Integration & Platform", 20,
+        "Data Integration & Unified Platform", 25,
         [
-            # Very broad data platform signals
             "data integration", "data platform", "data management",
-            "data fusion", "data analytics", "data sharing",
-            "data unification", "data environment", "data solution",
-            "data system", "data architecture", "data infrastructure",
-            "enterprise data", "integrated data", "data modernization",
-            "information sharing", "information integration",
-            "information management", "information platform",
+            "data analytics", "data sharing", "data fusion",
+            "data environment", "data solution", "data system",
+            "data infrastructure", "enterprise data", "data modernization",
+            "information sharing", "information management",
+            "information platform", "information integration",
             "database", "data warehouse", "data lake",
-            "analytics", "analytical", "dashboard", "reporting",
-            "business intelligence", "bi solution",
+            "analytics platform", "analytical platform",
+            "dashboard", "reporting", "business intelligence",
+            "unified platform", "integrated platform",
         ],
     ),
     (
-        "Search & Intelligence", 20,
+        "Investigative & Intelligence Analytics", 25,
         [
-            "search capability", "search platform", "search system",
-            "search solution", "enterprise search", "federated search",
-            "information retrieval", "data retrieval", "document retrieval",
-            "investigative", "investigation platform", "link analysis",
-            "geospatial", "geospatial analysis", "visualization",
-            "situational awareness", "intelligence platform",
-            "intelligence system", "operational intelligence",
-            "query", "knowledge management",
-            "records management system", "document management system",
+            "investigative", "intelligence platform", "intelligence system",
+            "link analysis", "geospatial", "visualization",
+            "situational awareness", "operational intelligence",
+            "operational dashboard", "real-time analytics",
+            "predictive analytics", "advanced analytics",
+            "crime analytics", "pattern analysis", "temporal analysis",
+            "search capability", "enterprise search", "federated search",
+            "information retrieval", "knowledge management",
         ],
     ),
     (
-        "Public Safety & Law Enforcement", 20,
+        "Public Safety, Law Enforcement & Corrections", 25,
         [
             "law enforcement", "public safety", "police", "sheriff",
-            "criminal justice", "justice", "corrections", "courts",
-            "prosecution", "investigation", "crime", "incident",
-            "first responder", "emergency", "dispatch", "cad",
-            "nibin", "etrace", "ballistic", "gang", "violent",
-            "offender", "probation", "parole", "pretrial", "reentry",
-            "supervision", "court services", "case management",
+            "criminal justice", "corrections", "court services",
+            "offender management", "community supervision",
+            "probation", "parole", "pretrial", "reentry",
+            "crime gun", "nibin", "etrace", "ballistic",
+            "first responder", "emergency management",
+            "records management", "computer-aided dispatch",
+            "case management", "incident management",
+            "gang", "violent crime", "crime reduction",
+            "fusion center", "investigation", "surveillance",
         ],
     ),
     (
-        "Software / SaaS / Cloud", 15,
+        "Secure Government SaaS", 20,
         [
-            "software", "saas", "cloud platform", "cloud solution",
-            "cloud service", "cloud migration", "cloud-based",
-            "cloud hosting", "web application", "web-based",
-            "platform", "application", "it solution", "it system",
-            "it platform", "it service", "technology solution",
-            "technology platform", "technology system",
-            "hosted solution", "subscription service",
-            "fedramp", "govcloud", "cjis", "nist", "zero trust",
-            "api", "integration services", "interoperability",
-            "modernization", "digital transformation",
-            "it modernization", "legacy modernization",
+            "fedramp", "cjis", "nist 800", "govcloud",
+            "zero trust", "saml", "single sign-on", "icam",
+            "role-based access", "attribute-based access",
+            "section 508", "audit logging", "data governance",
+            "cloud-based", "cloud platform", "cloud solution",
+            "saas", "software as a service", "hosted platform",
+            "software platform", "software solution",
         ],
     ),
     (
-        "AI / Machine Learning / Automation", 18,
+        "IT Modernization & Platform Replacement", 20,
         [
-            "artificial intelligence", "machine learning",
-            " ai ", "ai/ml", "ai solution", "ai platform", "ai system",
-            " ml ", "ml model", "automation", "automated",
-            "predictive", "nlp", "natural language", "algorithm",
-            "generative ai", "large language model", "llm",
-            "decision support",
+            "modernization", "legacy modernization", "legacy system",
+            "digital transformation", "system replacement",
+            "platform migration", "technology refresh",
+            "palantir", "ibm i2", "platform consolidation",
+            "incumbent replacement", "it modernization",
+            "software modernization", "application modernization",
+        ],
+    ),
+    (
+        "AI, Machine Learning & Automation", 18,
+        [
+            "artificial intelligence", "machine learning", "ai/ml",
+            "ai solution", "ai platform", "predictive",
+            "natural language processing", "nlp", "automation",
+            "decision support", "generative ai", "large language model",
+            "algorithm", "model-based",
         ],
     ),
 ]
 
-# Hard exclusions — ONLY pure physical/commodity work with zero software component
-HARD_EXCLUSIONS = [
-    "hvac maintenance", "janitorial services", "landscaping services",
-    "food service contract", "custodial services", "grounds maintenance",
-    "pest control services", "generator maintenance contract",
-    "roofing services", "flooring installation", "plumbing services",
-    "purchase of laptops", "purchase of desktops", "purchase of servers",
-    "hardware purchase", "hardware procurement",
-    "network cabling installation", "structured cabling",
-    "purchase of radios", "purchase of body armor",
-    "ballistic vest purchase", "purchase of firearms",
-    "ammunition procurement", "fleet vehicle acquisition",
-    "pharmaceutical procurement", "drug manufacturing",
-    "laboratory reagent", "refuse collection",
-    "moving services contract", "freight services",
-    "aircraft engine overhaul", "ship repair services",
-    "translation services", "interpretation services",
-    "attorney services", "legal representation",
-    "financial audit services", "accounting services",
-    "building maintenance services", "elevator maintenance",
-    # Physical hardware that Peregrine doesn't provide
-    "body-worn camera", "body worn camera", "bwc system",
-    "drone procurement", "uav system", "unmanned aerial",
-    "license plate reader hardware", "lpr hardware",
-    "surveillance camera installation", "cctv installation",
-    "weapon procurement", "taser procurement",
-    "vehicle maintenance", "fleet maintenance",
-    "furniture procurement", "office furniture",
-]
+# NAICS hints — infer capability when SAM.gov description is blank
+NAICS_CAPABILITY_HINTS = {
+    "513":    "software platform data management analytics saas",
+    "541511": "software development platform custom application",
+    "541512": "computer systems design technology platform solution",
+    "541519": "computer services it solution technology platform",
+    "518210": "data processing hosting cloud platform analytics",
+    "541690": "technical consulting analytics data solution",
+    "541715": "research analytics data platform",
+    "922":    "law enforcement criminal justice public safety corrections",
+    "922110": "courts criminal justice case management records",
+    "922120": "police law enforcement public safety records dispatch",
+    "922150": "probation parole corrections supervision offender management",
+    "922190": "public safety justice corrections law enforcement",
+    "923":    "corrections supervision justice case management reentry",
+}
 
-# Penalty signals — reduce score but don't exclude
-PENALTY_SIGNALS = [
-    ("staffing augmentation", -5),
-    ("time and materials labor", -5),
-    ("independent verification and validation", -5),
-    ("iv&v", -5),
-    ("translation only", -10),
-]
-
-# Hard exclusions — ONLY clearly physical/irrelevant work
-# Keep this list TIGHT — broad terms like "construction" wrongly exclude
-# IT solicitations that say things like "construction of a data platform"
+# Hard exclusions — ONLY work that has zero software/data component
+# Keep very specific to avoid blocking legitimate IT solicitations
 HARD_EXCLUSIONS = [
-    # Physical facilities (very specific phrases only)
-    "hvac maintenance", "janitorial services", "landscaping services",
-    "food service contract", "custodial services", "grounds maintenance",
-    "pest control services", "generator maintenance contract",
-    "electrical installation contract", "plumbing services",
-    "roofing services", "flooring installation",
-    # Hardware procurement (specific purchase phrases only)
-    "purchase of laptops", "purchase of desktops", "purchase of servers",
-    "purchase of tablets", "hardware purchase", "hardware procurement",
-    "network cabling installation", "structured cabling",
-    "purchase of radios", "radio system purchase",
-    "purchase of body armor", "ballistic vest purchase",
-    "purchase of firearms", "ammunition procurement",
-    "vehicle purchase", "fleet vehicle acquisition",
-    # Medical / pharma
-    "pharmaceutical procurement", "drug manufacturing",
-    "clinical trial services", "medical staffing",
-    "laboratory reagent", "lab supply procurement",
-    # Physical logistics
+    # Maintenance & repair (the big new addition)
+    "maintenance and repair", "repair and maintenance", "maintenance services only",
+    "equipment repair", "equipment maintenance", "preventive maintenance",
+    "corrective maintenance", "vehicle repair", "vehicle maintenance",
+    "facility maintenance", "building maintenance", "hvac maintenance",
+    "elevator maintenance", "generator maintenance", "engine repair",
+    "aircraft maintenance", "ship repair", "vessel maintenance",
+    # Physical facilities
+    "janitorial services", "landscaping services", "custodial services",
+    "grounds maintenance", "pest control services", "roofing services",
+    "flooring installation", "plumbing services", "painting services",
+    # Hardware-only procurement (specific phrases)
+    "hardware procurement", "hardware purchase", "purchase of laptops",
+    "purchase of desktops", "purchase of servers", "purchase of tablets",
+    "network cabling", "structured cabling", "body-worn camera purchase",
+    "body camera hardware", "purchase of radios", "radio hardware",
+    "purchase of body armor", "ballistic vest", "purchase of firearms",
+    "ammunition procurement", "vehicle purchase", "fleet vehicle acquisition",
+    "drone procurement", "uav procurement", "sensor hardware purchase",
+    # Food & clothing
+    "food service contract", "food supply", "clothing procurement",
+    "uniform procurement", "laundry services",
+    # Medical / pharma (non-IT)
+    "pharmaceutical procurement", "drug manufacturing", "medical supply",
+    "laboratory reagent", "clinical trial services",
+    # Logistics
     "refuse collection", "moving services", "freight services",
-    "aircraft engine overhaul", "ship repair services",
-    # Professional services clearly unrelated
-    "legal counsel services", "attorney services",
-    "translation services", "interpretation services",
-    "financial audit services", "accounting services",
-    # Facilities management (specific)
-    "building maintenance services", "elevator maintenance",
-    "window cleaning services",
-]
-
-# Penalty signals — reduce score but don't exclude
-PENALTY_SIGNALS = [
-    ("body shop", -10),
-    ("staffing augmentation", -8),
-    ("time and materials labor", -6),
-    ("independent verification and validation", -8),
-    ("iv&v", -8),
-    ("penetration testing only", -6),
-    ("translation only", -12),
-]
-
-def parse_date_flexible(date_str: str) -> datetime | None:
-    """Try multiple date formats and return a datetime or None."""
-    if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
-        return None
-    formats = [
-        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y",
-        "%b %d, %Y", "%d %b %Y",
-    ]
-    clean = date_str.strip()[:25]
-    for fmt in formats:
-        try:
-            return datetime.strptime(clean, fmt).replace(tzinfo=None)
-        except ValueError:
-            continue
-    return None
-
-def is_expired(opp: "Opportunity") -> bool:
-    """
-    Return True if the response deadline has clearly passed.
-    We use a 2-day grace buffer to avoid timezone edge cases.
-    If no deadline is parseable we keep the opportunity (err on side of inclusion).
-    """
-    today = datetime.utcnow()
-    grace = today - timedelta(days=2)
-
-    # Try response_date first, then posted_date as fallback
-    for date_str in [opp.response_date, opp.posted_date]:
-        dt = parse_date_flexible(date_str)
-        if dt:
-            return dt < grace
-    return False  # Can't determine — keep it
-
-
-# ---------------------------------------------------------------------------
-# CAPABILITY-BASED SCORING ENGINE
-#
-# Peregrine's core capabilities (what it actually does):
-#   1. Data Integration & Unification  — connect siloed systems into one environment
-#   2. Investigative / Operational Analytics — search, link analysis, geospatial, dashboards
-#   3. Federated Search — query across internal + external sources simultaneously
-#   4. Entity Resolution & Deduplication — patented record merging across systems
-#   5. Secure SaaS Platform — FedRAMP, CJIS, AWS GovCloud, NIST SP 800-53
-#   6. Public Safety / Law Enforcement — RMS, CAD, NIBIN, eTrace, crime gun intelligence
-#   7. Corrections & Supervision — probation, parole, offender management, CSOSA
-#   8. Palantir / Legacy Platform Replacement — enterprise intelligence modernization
-#
-# Scoring is CAPABILITY-MATCH driven, not keyword-spray:
-#   - Each capability has a cluster of specific, meaningful phrases
-#   - A hit in a cluster scores once for that cluster (no double-counting spray)
-#   - A NAICS match alone scores 0 — it must co-occur with capability signals
-#   - Hard exclusions for clearly irrelevant work
-# ---------------------------------------------------------------------------
-
-# Each capability cluster: (capability_name, points_if_matched, [phrases])
-# Phrases are SHORT and broad — matching how agencies actually write solicitations.
-CAPABILITY_CLUSTERS = [
-    (
-        "Data Integration & Platform", 20,
-        [
-            # Very broad data platform signals
-            "data integration", "data platform", "data management",
-            "data fusion", "data analytics", "data sharing",
-            "data unification", "data environment", "data solution",
-            "data system", "data architecture", "data infrastructure",
-            "enterprise data", "integrated data", "data modernization",
-            "information sharing", "information integration",
-            "information management", "information platform",
-            "database", "data warehouse", "data lake",
-            "analytics", "analytical", "dashboard", "reporting",
-            "business intelligence", "bi solution",
-        ],
-    ),
-    (
-        "Search & Intelligence", 20,
-        [
-            "search", "retrieval", "federated", "intelligence platform",
-            "investigative", "investigation", "link analysis",
-            "geospatial", "visualization", "situational awareness",
-            "real-time", "operational", "intelligence system",
-            "query", "knowledge management", "content management",
-            "records management", "document management",
-        ],
-    ),
-    (
-        "Public Safety & Law Enforcement", 20,
-        [
-            "law enforcement", "public safety", "police", "sheriff",
-            "criminal justice", "justice", "corrections", "courts",
-            "prosecution", "investigation", "crime", "incident",
-            "first responder", "emergency", "dispatch", "cad",
-            "nibin", "etrace", "ballistic", "gang", "violent",
-            "offender", "probation", "parole", "pretrial", "reentry",
-            "supervision", "court services", "case management",
-        ],
-    ),
-    (
-        "Software / SaaS / Cloud", 15,
-        [
-            "software", "saas", "cloud", "platform", "application",
-            "system", "solution", "tool", "capability", "service",
-            "web-based", "cloud-based", "hosted", "subscription",
-            "fedramp", "govcloud", "cjis", "nist", "zero trust",
-            "api", "integration", "interoperability", "modernization",
-            "digital transformation", "it modernization", "legacy",
-        ],
-    ),
-    (
-        "AI / Machine Learning / Automation", 18,
-        [
-            "artificial intelligence", "machine learning", "ai", "ml",
-            "automation", "automated", "predictive", "nlp",
-            "natural language", "algorithm", "model", "generative",
-            "large language", "llm", "decision support",
-        ],
-    ),
-]
-
-# Hard exclusions — ONLY pure physical/commodity work with zero software component
-HARD_EXCLUSIONS = [
-    "hvac maintenance", "janitorial services", "landscaping services",
-    "food service contract", "custodial services", "grounds maintenance",
-    "pest control services", "generator maintenance contract",
-    "roofing services", "flooring installation", "plumbing services",
-    "purchase of laptops", "purchase of desktops", "purchase of servers",
-    "hardware purchase", "hardware procurement",
-    "network cabling installation", "structured cabling",
-    "purchase of radios", "purchase of body armor",
-    "ballistic vest purchase", "purchase of firearms",
-    "ammunition procurement", "fleet vehicle acquisition",
-    "pharmaceutical procurement", "drug manufacturing",
-    "laboratory reagent", "refuse collection",
-    "moving services contract", "freight services",
-    "aircraft engine overhaul", "ship repair services",
-    "translation services", "interpretation services",
-    "attorney services", "legal representation",
-    "financial audit services", "accounting services",
-    "building maintenance services", "elevator maintenance",
-]
-
-# Penalty signals — reduce score but don't exclude
-PENALTY_SIGNALS = [
-    ("staffing augmentation", -5),
-    ("time and materials labor", -5),
-    ("independent verification and validation", -5),
-    ("iv&v", -5),
-    ("translation only", -10),
-]
-
-# Hard exclusions — ONLY clearly physical/irrelevant work
-# Keep this list TIGHT — broad terms like "construction" wrongly exclude
-# IT solicitations that say things like "construction of a data platform"
-HARD_EXCLUSIONS = [
-    # Physical facilities (very specific phrases only)
-    "hvac maintenance", "janitorial services", "landscaping services",
-    "food service contract", "custodial services", "grounds maintenance",
-    "pest control services", "generator maintenance contract",
-    "electrical installation contract", "plumbing services",
-    "roofing services", "flooring installation",
-    # Hardware procurement (specific purchase phrases only)
-    "purchase of laptops", "purchase of desktops", "purchase of servers",
-    "purchase of tablets", "hardware purchase", "hardware procurement",
-    "network cabling installation", "structured cabling",
-    "purchase of radios", "radio system purchase",
-    "purchase of body armor", "ballistic vest purchase",
-    "purchase of firearms", "ammunition procurement",
-    "vehicle purchase", "fleet vehicle acquisition",
-    # Medical / pharma
-    "pharmaceutical procurement", "drug manufacturing",
-    "clinical trial services", "medical staffing",
-    "laboratory reagent", "lab supply procurement",
-    # Physical logistics
-    "refuse collection", "moving services", "freight services",
-    "aircraft engine overhaul", "ship repair services",
-    # Professional services clearly unrelated
-    "legal counsel services", "attorney services",
-    "translation services", "interpretation services",
-    "financial audit services", "accounting services",
-    # Facilities management (specific)
-    "building maintenance services", "elevator maintenance",
-    "window cleaning services",
-]
-
-# Penalty signals — reduce score but don't exclude
-PENALTY_SIGNALS = [
-    ("body shop", -10),
-    ("staffing augmentation", -8),
-    ("time and materials labor", -6),
-    ("independent verification and validation", -8),
-    ("iv&v", -8),
-    ("penetration testing only", -6),
-    ("translation only", -12),
-]
-
-def parse_date_flexible(date_str: str) -> datetime | None:
-    """Try multiple date formats and return a datetime or None."""
-    if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
-        return None
-    formats = [
-        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y",
-        "%b %d, %Y", "%d %b %Y",
-    ]
-    clean = date_str.strip()[:25]
-    for fmt in formats:
-        try:
-            return datetime.strptime(clean, fmt).replace(tzinfo=None)
-        except ValueError:
-            continue
-    return None
-
-def is_expired(opp: "Opportunity") -> bool:
-    """
-    Return True if the response deadline has clearly passed.
-    We use a 2-day grace buffer to avoid timezone edge cases.
-    If no deadline is parseable we keep the opportunity (err on side of inclusion).
-    """
-    today = datetime.utcnow()
-    grace = today - timedelta(days=2)
-
-    # Try response_date first, then posted_date as fallback
-    for date_str in [opp.response_date, opp.posted_date]:
-        dt = parse_date_flexible(date_str)
-        if dt:
-            return dt < grace
-    return False  # Can't determine — keep it
-
-
-# ---------------------------------------------------------------------------
-# CAPABILITY-BASED SCORING ENGINE
-#
-# Peregrine's core capabilities (what it actually does):
-#   1. Data Integration & Unification  — connect siloed systems into one environment
-#   2. Investigative / Operational Analytics — search, link analysis, geospatial, dashboards
-#   3. Federated Search — query across internal + external sources simultaneously
-#   4. Entity Resolution & Deduplication — patented record merging across systems
-#   5. Secure SaaS Platform — FedRAMP, CJIS, AWS GovCloud, NIST SP 800-53
-#   6. Public Safety / Law Enforcement — RMS, CAD, NIBIN, eTrace, crime gun intelligence
-#   7. Corrections & Supervision — probation, parole, offender management, CSOSA
-#   8. Palantir / Legacy Platform Replacement — enterprise intelligence modernization
-#
-# Scoring is CAPABILITY-MATCH driven, not keyword-spray:
-#   - Each capability has a cluster of specific, meaningful phrases
-#   - A hit in a cluster scores once for that cluster (no double-counting spray)
-#   - A NAICS match alone scores 0 — it must co-occur with capability signals
-#   - Hard exclusions for clearly irrelevant work
-# ---------------------------------------------------------------------------
-
-# Each capability cluster: (capability_name, points_if_matched, [phrases])
-# Phrases must be specific enough that a hit strongly implies Peregrine can do the work.
-CAPABILITY_CLUSTERS = [
-    (
-        "Data Integration & Unification",
-        25,
-        [
-            "data integration", "data unification", "data fusion", "unified data",
-            "integrate disparate", "siloed data", "data silos", "disparate systems",
-            "disparate data sources", "multi-source data", "data harmonization",
-            "data ingestion", "enterprise data platform", "data integration platform",
-            "master data management", "data normalization", "data lake", "data fabric",
-            "data mesh", "federated data", "data consolidation", "unified environment",
-        ],
-    ),
-    (
-        "Investigative & Operational Analytics",
-        25,
-        [
-            "investigative analytics", "investigative platform", "investigative workflow",
-            "link analysis", "relationship mapping", "entity analytics",
-            "operational intelligence", "operational dashboard", "situational awareness",
-            "real-time dashboard", "temporal analysis", "geospatial analysis",
-            "geospatial intelligence", "common operating picture", "pattern of life",
-            "advanced analytics", "crime analytics", "predictive analytics",
-            "intelligence platform", "all-source analytics", "mission analytics",
-        ],
-    ),
-    (
-        "Federated Search",
-        25,
-        [
-            "federated search", "enterprise search", "cross-system search",
-            "unified search", "search across", "search multiple systems",
-            "multi-system search", "search and retrieval", "information retrieval",
-            "search capability", "knowledge retrieval", "query across",
-        ],
-    ),
-    (
-        "Entity Resolution & Record Intelligence",
-        20,
-        [
-            "entity resolution", "record deduplication", "record linkage",
-            "record resolution", "duplicate records", "identity resolution",
-            "entity matching", "data deduplication", "master record",
-            "person record", "entity-centric", "record consolidation",
-            "ontology", "knowledge graph", "graph analytics",
-        ],
-    ),
-    (
-        "Secure Government SaaS Platform",
-        15,
-        [
-            "fedramp high", "fedramp moderate", "fedramp authorized",
-            "cjis", "nist sp 800-53", "aws govcloud", "govcloud",
-            "zero trust", "icam", "saml 2.0", "single sign-on",
-            "role-based access control", "attribute-based access",
-            "section 508", "wcag", "audit logging", "data sovereignty",
-            "secure saas", "government saas", "cloud-hosted",
-        ],
-    ),
-    (
-        "Public Safety & Law Enforcement",
-        20,
-        [
-            "law enforcement", "public safety", "police", "sheriff",
-            "nibin", "etrace", "crime gun", "ballistic", "cgic",
-            "rms", "records management system", "cad", "computer-aided dispatch",
-            "first responder", "criminal investigation", "violent crime",
-            "gang intelligence", "crime reduction", "officer wellness",
-            "body camera", "evidence management", "fusion center",
-        ],
-    ),
-    (
-        "Corrections & Community Supervision",
-        20,
-        [
-            "community supervision", "probation", "parole", "reentry",
-            "corrections", "offender management", "supervision officer",
-            "court services", "pretrial", "case supervision",
-            "csosa", "bureau of prisons", "department of corrections",
-            "recidivism", "offender data", "supervision platform",
-            "smart21", "case management supervision",
-        ],
-    ),
-    (
-        "Platform Modernization / Incumbent Replacement",
-        20,
-        [
-            "palantir", "gotham", "foundry", "platform replacement",
-            "platform modernization", "legacy platform", "incumbent replacement",
-            "platform consolidation", "technology refresh",
-            "legacy modernization", "platform migration",
-            "ibm i2", "data platform upgrade",
-        ],
-    ),
-]
-
-# Hard exclusions — if ANY of these appear, immediately discard
-HARD_EXCLUSIONS = [
-    # Physical / facilities
-    "construction", "hvac", "janitorial", "landscaping", "food service",
-    "furniture", "vehicle maintenance", "facilities management", "custodial",
-    "grounds maintenance", "pest control", "generator maintenance",
-    "electrical installation", "plumbing", "roofing", "flooring",
-    # Medical / pharma
-    "medical supply", "pharmaceutical", "drug manufacturing",
-    "clinical trial", "healthcare staffing", "nursing",
-    # Staffing / HR
-    "staffing agency", "temp staff", "temporary personnel",
-    "recruitment services", "executive search firm",
-    # Logistics / supply chain
-    "office supplies", "clothing", "uniform", "laundry",
-    "refuse collection", "shipping", "freight",
-    "aircraft maintenance", "ship repair", "vehicle fleet",
-    # Hardware procurement (Peregrine is software-only)
-    "hardware procurement", "server hardware", "network hardware",
-    "laptop purchase", "desktop purchase", "tablet purchase",
-    "computer purchase", "printer purchase", "monitor purchase",
-    "switch procurement", "router procurement", "firewall appliance",
-    "storage hardware", "rack equipment",
-    "network cabling", "structured cabling",
-    "body-worn camera purchase", "body camera hardware",
-    "radio hardware", "radio procurement", "radio system purchase",
-    "vehicle purchase", "vehicle acquisition", "fleet vehicle",
-    "body armor", "ballistic vest", "tactical equipment purchase",
-    "weapon purchase", "firearm purchase", "ammunition",
-    "sensor hardware", "drone hardware", "uav procurement",
-    # Medical / pharma / lab
-    "medical supply", "pharmaceutical", "drug manufacturing",
-    "clinical trial", "healthcare staffing", "nursing",
-    "laboratory equipment", "lab supplies", "reagent",
-    # Staffing / HR (pure body shop)
-    "staffing agency", "temp staff", "temporary personnel",
-    "recruitment services", "executive search firm",
-    # Physical logistics
-    "office supplies", "clothing", "uniform", "laundry",
-    "refuse collection", "shipping", "freight", "moving services",
-    "aircraft maintenance", "ship repair", "engine overhaul",
-    # Low-signal IT services
-    "help desk staffing", "printer maintenance",
-    "telephone system installation", "audio visual installation",
+    "shipping contract",
     # Professional services unrelated to Peregrine
-    "legal services", "legal counsel", "attorney services",
-    "financial audit", "accounting services",
     "translation services", "interpretation services",
+    "attorney services", "legal representation",
+    "financial audit services", "accounting services",
 ]
 
-# Penalty signals — reduce score if present (suggest mismatch but don't hard exclude)
+# Penalty signals — mismatch indicators (reduce score but don't exclude)
 PENALTY_SIGNALS = [
-    ("custom software development only", -10),   # pure dev shop ask, not SaaS
-    ("staffing augmentation", -10),               # T&M body shop, not product
-    ("time and materials", -8),
-    ("independent verification", -8),             # IV&V work, not platform
-    ("penetration testing", -8),                  # pure security assessment
-    ("audit services", -8),                       # compliance audit, not platform
-    ("translation services", -15),
-    ("legal services", -15),
-    ("training services only", -10),              # pure training contract
+    ("staffing augmentation", -8),
+    ("time and materials labor", -6),
+    ("independent verification and validation", -6),
+    ("iv&v services", -6),
+    ("penetration testing only", -5),
 ]
-
 
 # NAICS prefix → capability hints for scoring when description is blank
 NAICS_CAPABILITY_HINTS = {
@@ -1408,73 +749,88 @@ def fetch_agency_rss_feeds() -> list[Opportunity]:
 # Tracks congressional hearings/markups that signal upcoming federal IT spend
 # NO KEY REQUIRED
 # ---------------------------------------------------------------------------
-def fetch_congress_signals() -> list[Opportunity]:
-    results = []
+def fetch_industry_news() -> list[dict]:
+    """
+    Fetch recent news from public RSS feeds covering Peregrine's market:
+    law enforcement tech, public safety data, govtech, corrections,
+    federal IT procurement, and AI in government.
+    Returns a list of news item dicts (not Opportunity objects).
+    """
     today = datetime.utcnow()
-    since = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+    news_items = []
+    seen_titles = set()
 
-    # Congress.gov offers public RSS feeds for committee activities
-    committee_feeds = [
-        {
-            "url": "https://www.congress.gov/rss/most-recent-bills.xml",
-            "label": "Most Recent Bills",
-        },
-        {
-            "url": "https://www.congress.gov/rss/most-recent-actions.xml",
-            "label": "Most Recent Actions",
-        },
+    news_feeds = [
+        # Law enforcement & public safety tech
+        {"url": "https://www.govtech.com/public-safety/rss.xml",       "source": "GovTech — Public Safety"},
+        {"url": "https://www.govtech.com/law-enforcement/rss.xml",     "source": "GovTech — Law Enforcement"},
+        {"url": "https://www.police1.com/rss/all/",                    "source": "Police1"},
+        {"url": "https://www.corrections1.com/rss/all/",               "source": "Corrections1"},
+        # Federal IT & procurement
+        {"url": "https://fedscoop.com/feed/",                          "source": "FedScoop"},
+        {"url": "https://gcn.com/rss-feeds/all.aspx",                  "source": "GCN"},
+        {"url": "https://www.nextgov.com/rss/all/",                    "source": "Nextgov"},
+        {"url": "https://www.federaltimes.com/rss/",                   "source": "Federal Times"},
+        # AI in government
+        {"url": "https://www.govtech.com/artificial-intelligence/rss.xml", "source": "GovTech — AI"},
     ]
 
-    signal_keywords = [
-        "public safety", "law enforcement", "artificial intelligence", "data analytics",
-        "homeland security", "emergency management", "cybersecurity", "surveillance",
-        "technology", "digital", "information technology",
+    # Keywords that make a news item relevant to Peregrine
+    relevant_keywords = [
+        "law enforcement", "public safety", "police", "sheriff", "corrections",
+        "probation", "parole", "supervision", "criminal justice", "data analytics",
+        "data integration", "data platform", "data sharing", "intelligence platform",
+        "investigative", "crime analytics", "records management", "dispatch",
+        "palantir", "govtech", "federal it", "fedramp", "cjis",
+        "artificial intelligence", "machine learning", "predictive",
+        "procurement", "contract award", "rfp", "sources sought",
+        "fusion center", "surveillance", "crime reduction", "violent crime",
     ]
 
-    for feed in committee_feeds:
+    for feed in news_feeds:
         try:
-            resp = requests.get(feed["url"], headers=HEADERS, timeout=20)
+            resp = requests.get(feed["url"], headers={
+                "User-Agent": "PeregrineScanner/2.0",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            }, timeout=15)
             if resp.status_code != 200:
                 continue
-            root = ET.fromstring(resp.content)
-            items = root.findall(".//item")
 
-            for item in items[:15]:
+            root = ET.fromstring(resp.content)
+            items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+
+            for item in items[:10]:
                 title_el = item.find("title")
                 link_el  = item.find("link")
-                desc_el  = item.find("description")
-                date_el  = item.find("pubDate")
+                desc_el  = item.find("description") or item.find("summary")
+                date_el  = item.find("pubDate") or item.find("published")
 
-                title = title_el.text or "Untitled" if title_el is not None else "Untitled"
-                desc  = unescape(re.sub("<[^>]+>", "", desc_el.text or "")) if desc_el is not None else ""
-                url_  = link_el.text or "" if link_el is not None else ""
-                date_ = date_el.text or "" if date_el is not None else ""
+                title = (title_el.text or "").strip() if title_el is not None else ""
+                desc  = unescape(re.sub(r"<[^>]+>", "", (desc_el.text or ""))).strip() if desc_el is not None else ""
+                url_  = (link_el.text or "").strip() if link_el is not None else ""
+                date_ = (date_el.text or "").strip() if date_el is not None else ""
 
-                combined = f"{title} {desc}".lower()
-                if not any(kw in combined for kw in signal_keywords):
+                if not title or title in seen_titles:
                     continue
 
-                opp = Opportunity(
-                    title=f"[LEGISLATIVE SIGNAL] {title}",
-                    notice_id=f"CON-{hash(title) % 10**9}",
-                    agency="U.S. Congress",
-                    posted_date=date_[:10] if date_ else today.strftime("%Y-%m-%d"),
-                    response_date="Monitor for follow-on procurement",
-                    description=(
-                        f"Congressional activity that may signal upcoming federal procurement. "
-                        f"{desc[:800]}"
-                    ),
-                    url=url_,
-                    opp_type="Legislative Signal",
-                    source="Congress.gov",
-                )
-                results.append(score_opportunity(opp))
+                combined = f"{title} {desc}".lower()
+                if not any(kw in combined for kw in relevant_keywords):
+                    continue
+
+                seen_titles.add(title)
+                news_items.append({
+                    "title": title,
+                    "source": feed["source"],
+                    "url": url_,
+                    "date": date_[:16] if date_ else today.strftime("%Y-%m-%d"),
+                    "summary": desc[:300],
+                })
             time.sleep(0.2)
         except Exception as e:
-            print(f"[Congress] {feed['label']}: {e}")
+            print(f"[News] {feed['source']}: {e}")
 
-    print(f"[Congress.gov] {len(results)} signals fetched")
-    return results
+    print(f"[Industry News] {len(news_items)} relevant articles found")
+    return news_items[:20]  # Cap at 20 most relevant
 
 
 # ---------------------------------------------------------------------------
@@ -1592,8 +948,36 @@ def build_section(title: str, opps: list[Opportunity]) -> str:
       {"".join(opp_card(o) for o in opps)}
     </div>"""
 
+def build_news_section(news_items: list) -> str:
+    """Build a compact industry news digest — just bullets, no full cards."""
+    if not news_items:
+        return """
+        <div style="margin:20px 0 6px">
+          <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">📰 Industry News & Signals</h2>
+          <p style="color:#aaa;font-size:13px;font-style:italic">No relevant news found today.</p>
+        </div>"""
+
+    bullets = ""
+    for item in news_items[:12]:
+        summary = item.get("summary", "")[:180].strip()
+        if summary and not summary.endswith((".", "?", "!")):
+            summary += "..."
+        bullets += f"""
+        <li style="margin-bottom:10px;line-height:1.4;">
+          <a href="{item['url']}" style="font-weight:600;color:#0057b8;text-decoration:none;">{item['title'][:100]}</a>
+          <span style="font-size:11px;color:#888;margin-left:6px;">{item['source']} · {item['date'][:10]}</span>
+          {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
+        </li>"""
+
+    return f"""
+    <div style="margin:20px 0 6px">
+      <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">📰 Industry News & Market Signals ({len(news_items)})</h2>
+      <ul style="margin:0;padding-left:18px;list-style:disc;">{bullets}</ul>
+    </div>"""
+
+
 def build_html_email(opps: list[Opportunity], run_date: str,
-                     source_counts: dict) -> str:
+                     source_counts: dict, news_items: list = None) -> str:
     # Exclude events from solicitation tiers so stats bar reflects actual RFI/RFP counts
     non_events = [o for o in opps if o.source != "Events Intelligence"]
     tiers = {
@@ -1656,9 +1040,9 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
-  {build_section("⚪ Low Fit — Worth a Look", [o for o in non_events if o.tier == "⚪ Low Fit" and any(kw in (o.title + o.agency).lower() for kw in ["data", "software", "system", "platform", "analytics", "intelligence", "justice", "safety", "law enforcement", "corrections", "cloud", "technology", "it ", "information"])])}
+  {build_section("⚪ Low Fit — Worth a Look", [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
-  {build_section("🏛 Legislative Signals", signals[:5])}
+  {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
 
   <!-- Footer -->
@@ -2036,7 +1420,7 @@ def main():
         ("Federal Register",  fetch_federal_register),
         ("USASpending.gov",   fetch_usaspending_intel),
         ("Agency RSS",        fetch_agency_rss_feeds),
-        ("Congress.gov",      fetch_congress_signals),
+        ("Industry News",     lambda: []),  # news handled separately below
         ("Events",            fetch_events_intelligence),
     ]
 
@@ -2088,8 +1472,18 @@ def main():
     else:
         subject = f"🦅 Peregrine Daily | {good} Good Fits · {possible} Possible | {run_date}"
 
+    # Fetch industry news separately (returns dicts, not Opportunities)
+    print("\n[Industry News] Fetching relevant news...")
+    try:
+        news_items = fetch_industry_news()
+        source_counts["Industry News"] = len(news_items)
+    except Exception as e:
+        print(f"[Industry News] Error: {e}")
+        news_items = []
+        source_counts["Industry News"] = 0
+
     # Build and send
-    html = build_html_email(ranked, run_date, source_counts)
+    html = build_html_email(ranked, run_date, source_counts, news_items=news_items)
     send_email(html, subject)
 
     # Save local copy
