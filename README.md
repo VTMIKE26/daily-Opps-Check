@@ -1,6 +1,6 @@
 # 🦅 Peregrine Daily Federal Scanner — v2 Multi-Source Edition
 
-Automated daily search across **5 federal data sources** for RFIs, Sources Sought notices,
+Automated daily search across **5 federal data sources** for RFIs, Sources Sought notices, 
 Industry Days, competitive intelligence, and legislative signals relevant to Peregrine.io.
 Ranks every result by fit, and emails a formatted HTML digest every morning at 9am ET.
 
