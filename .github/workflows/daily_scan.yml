@@ -35,7 +35,7 @@ jobs:
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           EMAIL_TO:         mike.kelly@peregrine.io
           EMAIL_FROM:       mike.kelly@peregrine.io
-        run: python search_and_alert.py
+        run: python daily_scan.py
 
       - name: Upload HTML digest as artifact
         if: always()
