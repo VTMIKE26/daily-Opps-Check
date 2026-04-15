@@ -856,20 +856,36 @@ PENALTY_SIGNALS = [
 ]
 
 
+# NAICS prefix → capability hints for scoring when description is blank
+NAICS_CAPABILITY_HINTS = {
+    "513":    "software platform data management analytics",
+    "541511": "software development platform custom application",
+    "541512": "computer systems design technology platform",
+    "541519": "computer services it solution technology",
+    "518210": "data processing hosting cloud platform analytics",
+    "541690": "technical consulting analytics data solution",
+    "922":    "law enforcement criminal justice public safety",
+    "922110": "courts criminal justice case management",
+    "922120": "police law enforcement public safety records",
+    "922150": "probation parole corrections supervision offender",
+    "922190": "public safety justice corrections law enforcement",
+    "923":    "corrections supervision justice case management",
+}
+
 def score_opportunity(opp: Opportunity) -> Opportunity:
     """
-    Score based on genuine capability match.
-    Rules:
-      - Hard exclusion = score -1, stop immediately
-      - Past deadline = score -1, stop immediately
-      - Each capability cluster can score at most once
-      - NAICS alone contributes 0 — must have capability signal too
-      - Agency tier adds a modest bonus only when capability already matches
-      - Penalties reduce score for mismatch signals
-      - Minimum 2 capability clusters must match for Strong Fit
+    Score based on capability match. Permissive — surfaces anything that could
+    plausibly involve Peregrine's platform. Uses NAICS hints when description
+    is empty (common with SAM.gov search API).
     """
-    # ── 1. Hard exclusion check ───────────────────────────────────────────────
-    text = f"{opp.title} {opp.description} {opp.agency}".lower()
+    # Build enriched text including NAICS-derived capability hints
+    naics_hint = ""
+    if opp.naics:
+        for prefix, hint in NAICS_CAPABILITY_HINTS.items():
+            if opp.naics.startswith(prefix):
+                naics_hint = hint
+                break
+    text = f"{opp.title} {opp.description} {opp.agency} {naics_hint}".lower()
     for excl in HARD_EXCLUSIONS:
         if excl.lower() in text:
             opp.score = -1
@@ -888,13 +904,17 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     score = 0
     reasons = []
     clusters_matched = 0
+    title_only = opp.title.lower()
 
     for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
         hits = [p for p in phrases if p.lower() in text]
+        # When description is missing/short, also match against title alone
+        # SAM.gov search API frequently returns empty description fields
+        if not hits and len(opp.description) < 80:
+            hits = [p for p in phrases if p.lower() in title_only]
         if hits:
             score += cap_points
             clusters_matched += 1
-            # Show the 3 most specific hits (longest phrases = more specific)
             top_hits = sorted(hits, key=len, reverse=True)[:3]
             reasons.append(f"✓ {cap_name}: matched '{top_hits[0]}'" +
                           (f" + {len(hits)-1} more" if len(hits) > 1 else ""))
@@ -997,7 +1017,7 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 def fetch_sam_gov() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    from_date = (today - timedelta(days=1)).strftime("%m/%d/%Y")
+    from_date = (today - timedelta(days=7)).strftime("%m/%d/%Y")
     to_date = today.strftime("%m/%d/%Y")
 
     notice_types = {"r": "RFI", "s": "Sources Sought", "i": "Industry Day", "p": "Pre-Solicitation"}
@@ -1008,7 +1028,7 @@ def fetch_sam_gov() -> list[Opportunity]:
                 "https://api.sam.gov/opportunities/v2/search",
                 params={"api_key": SAM_API_KEY, "postedFrom": from_date,
                         "postedTo": to_date, "noticetype": code, "limit": 100,
-                        "active": "Yes"},
+                        
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
@@ -1066,7 +1086,7 @@ def fetch_sam_gov() -> list[Opportunity]:
                         "postedFrom": (today - timedelta(days=7)).strftime("%m/%d/%Y"),
                         "postedTo": (today + timedelta(days=60)).strftime("%m/%d/%Y"),
                         "noticetype": "i", "limit": 25,
-                        "active": "Yes"},
+                        
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
@@ -1638,7 +1658,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
-  {build_section("⚪ Low Fit — Full Landscape View", [o for o in non_events if o.tier == "⚪ Low Fit"])}
+  {build_section("⚪ Low Fit — Worth a Look", [o for o in non_events if o.tier == "⚪ Low Fit" and any(kw in (o.title + o.agency).lower() for kw in ["data", "software", "system", "platform", "analytics", "intelligence", "justice", "safety", "law enforcement", "corrections", "cloud", "technology", "it ", "information"])])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_section("🏛 Legislative Signals", signals[:5])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
