@@ -54,6 +54,59 @@ HEADERS = {
 # general IT helpdesk. It IS: a SaaS data platform with analytics.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# DATA CLASS
+# ---------------------------------------------------------------------------
+from dataclasses import dataclass, field as dc_field
+
+@dataclass
+class Opportunity:
+    title: str
+    notice_id: str
+    agency: str
+    posted_date: str
+    response_date: str
+    description: str
+    url: str
+    opp_type: str
+    source: str
+    naics: str = ""
+    score: int = 0
+    score_reasons: list = dc_field(default_factory=list)
+    tier: str = ""
+
+
+# ---------------------------------------------------------------------------
+# DATE UTILITIES
+# ---------------------------------------------------------------------------
+def parse_date_flexible(date_str: str):
+    """Try multiple date formats and return a datetime or None."""
+    if not date_str or date_str in ("TBD", "N/A", "See posting",
+            "Watch for recompete", "See event page for registration deadline",
+            "Monitor for follow-on procurement"):
+        return None
+    fmts = [
+        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%d %b %Y",
+    ]
+    clean = date_str.strip()[:25]
+    for fmt in fmts:
+        try:
+            return datetime.strptime(clean, fmt).replace(tzinfo=None)
+        except ValueError:
+            continue
+    return None
+
+def is_expired(opp) -> bool:
+    """Return True if the response deadline has clearly passed (2-day grace)."""
+    grace = datetime.utcnow() - timedelta(days=2)
+    for date_str in [opp.response_date, opp.posted_date]:
+        dt = parse_date_flexible(date_str)
+        if dt:
+            return dt < grace
+    return False
+
+
 # Peregrine's 6 core capability areas — what it actually sells and deploys
 CAPABILITY_CLUSTERS = [
     (
@@ -135,21 +188,6 @@ CAPABILITY_CLUSTERS = [
 ]
 
 # NAICS hints — infer capability when SAM.gov description is blank
-NAICS_CAPABILITY_HINTS = {
-    "513":    "software platform data management analytics saas",
-    "541511": "software development platform custom application",
-    "541512": "computer systems design technology platform solution",
-    "541519": "computer services it solution technology platform",
-    "518210": "data processing hosting cloud platform analytics",
-    "541690": "technical consulting analytics data solution",
-    "541715": "research analytics data platform",
-    "922":    "law enforcement criminal justice public safety corrections",
-    "922110": "courts criminal justice case management records",
-    "922120": "police law enforcement public safety records dispatch",
-    "922150": "probation parole corrections supervision offender management",
-    "922190": "public safety justice corrections law enforcement",
-    "923":    "corrections supervision justice case management reentry",
-}
 
 # Hard exclusions — ONLY work that has zero software/data component
 # Keep very specific to avoid blocking legitimate IT solicitations
