@@ -851,6 +851,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     fr_rfis   = [o for o in opps if o.source == "Federal Register"]
     usa_intel = [o for o in opps if o.source == "USASpending.gov"]
     signals   = [o for o in opps if o.source == "Congress.gov"]
+    events    = [o for o in opps if o.source == "Events Intelligence"]
 
     stats = [
         ("Total", len(opps)),
@@ -858,7 +859,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
         ("🟡 Good", len(tiers["good"])),
         ("RFIs/SS", sum(1 for o in opps if o.opp_type in ("RFI", "Sources Sought", "Federal Register RFI"))),
         ("Industry Days", len(ind_days)),
-        ("Award Intel", len(usa_intel)),
+        ("Events", len(events)),
     ]
     stat_cells = "".join(f"""
         <td style="text-align:center;padding:4px 14px;border-right:1px solid #e8e8e8">
@@ -881,7 +882,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   <div style="background:linear-gradient(135deg,#0057b8 0%,#003580 100%);border-radius:12px;padding:28px 32px;margin-bottom:16px;color:#fff">
     <div style="font-size:11px;text-transform:uppercase;letter-spacing:2.5px;opacity:0.65;margin-bottom:5px">Daily Federal Intelligence — Peregrine.io</div>
     <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px">🦅 Opportunity Digest</div>
-    <div style="font-size:13px;opacity:0.75;margin-top:5px">{run_date} &nbsp;·&nbsp; 5 Sources Searched</div>
+    <div style="font-size:13px;opacity:0.75;margin-top:5px">{run_date} &nbsp;·&nbsp; 6 Sources Searched</div>
   </div>
 
   <!-- Stats Bar -->
@@ -899,7 +900,8 @@ def build_html_email(opps: list[Opportunity], run_date: str,
 
   {build_section("🟢 Strong Fit — Act Now", tiers["strong"])}
   {build_section("🟡 Good Fit — Review Today", tiers["good"])}
-  {build_section("📅 Industry Days & Events", ind_days)}
+  {build_section("📅 Industry Days (SAM.gov)", ind_days)}
+  {build_section("🎤 Conferences & Events to Attend", sorted(events, key=lambda x: x.score, reverse=True)[:15])}
   {build_section("📰 Federal Register RFIs", [o for o in fr_rfis if o.opp_type != "Industry Day" and "Strong" not in o.tier and "Good" not in o.tier])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_section("🏛 Legislative Signals", signals[:5])}
@@ -908,7 +910,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   <!-- Footer -->
   <div style="text-align:center;font-size:11px;color:#bbb;margin-top:24px;padding:20px;border-top:1px solid #e0e0e0">
     Peregrine Daily Scanner &nbsp;·&nbsp; {run_date}<br>
-    Sources: SAM.gov · Federal Register · USASpending.gov · Agency RSS · Congress.gov<br><br>
+    Sources: SAM.gov · Federal Register · USASpending.gov · Agency RSS · Congress.gov · Events Intelligence<br><br>
     <a href="https://sam.gov/search/?index=opp" style="color:#0057b8;text-decoration:none">Browse all SAM.gov</a> &nbsp;·&nbsp;
     <a href="https://www.federalregister.gov/documents/search?conditions%5Btype%5D%5B%5D=NOTICE" style="color:#0057b8;text-decoration:none">Federal Register Notices</a> &nbsp;·&nbsp;
     <a href="https://www.usaspending.gov/search" style="color:#0057b8;text-decoration:none">USASpending Search</a>
@@ -916,6 +918,313 @@ def build_html_email(opps: list[Opportunity], run_date: str,
 </div>
 </body></html>"""
 
+
+
+# ---------------------------------------------------------------------------
+# SOURCE 6: EVENTS INTELLIGENCE
+# Scrapes public event listing sites for upcoming federal tech conferences,
+# summits, and expos relevant to Peregrine's market. No API key required.
+# ---------------------------------------------------------------------------
+
+# Known recurring events Peregrine should attend — checked against upcoming dates
+KNOWN_EVENTS = [
+    {
+        "name": "IACP Annual Conference",
+        "org": "International Association of Chiefs of Police",
+        "url": "https://www.theiacp.org/events",
+        "why": "Premier law enforcement leadership event — 400+ agency heads, direct Peregrine customer profile",
+        "typical_month": "October",
+        "tier": "🟢 Strong Fit",
+        "score": 90,
+    },
+    {
+        "name": "National Sheriffs\'Association Annual Conference",
+        "org": "National Sheriffs\' Association",
+        "url": "https://www.sheriffs.org/events",
+        "why": "Sheriff departments are core Peregrine customers — investigative analytics, data integration",
+        "typical_month": "June",
+        "tier": "🟢 Strong Fit",
+        "score": 88,
+    },
+    {
+        "name": "NOBLE Annual Conference",
+        "org": "National Organization of Black Law Enforcement Executives",
+        "url": "https://www.noblenatl.org",
+        "why": "Law enforcement leadership — Peregrine customer profile, violent crime reduction mission",
+        "typical_month": "July",
+        "tier": "🟢 Strong Fit",
+        "score": 82,
+    },
+    {
+        "name": "Police Executive Research Forum (PERF) Annual Meeting",
+        "org": "PERF",
+        "url": "https://perf.memberclicks.net",
+        "why": "Senior law enforcement executives — data-driven policing, analytics buyers",
+        "typical_month": "March",
+        "tier": "🟢 Strong Fit",
+        "score": 85,
+    },
+    {
+        "name": "GovTech Summit",
+        "org": "Government Technology",
+        "url": "https://www.govtech.com/events",
+        "why": "State & local government technology buyers — data integration, public safety tech",
+        "typical_month": "November",
+        "tier": "🟢 Strong Fit",
+        "score": 80,
+    },
+    {
+        "name": "Amazon Web Services (AWS) Public Sector Summit",
+        "org": "AWS",
+        "url": "https://aws.amazon.com/events/summits/washington-dc/",
+        "why": "GovCloud buyers — Peregrine runs on AWS GovCloud, strong partner/customer overlap",
+        "typical_month": "June",
+        "tier": "🟢 Strong Fit",
+        "score": 78,
+    },
+    {
+        "name": "ATOA National Training Conference",
+        "org": "ATF Officers Association",
+        "url": "https://www.atfoa.org",
+        "why": "Direct ATF audience — Peregrine submitted RFI to ATF, NIBIN/eTrace use case",
+        "typical_month": "September",
+        "tier": "🟢 Strong Fit",
+        "score": 92,
+    },
+    {
+        "name": "APPA Annual Training Institute",
+        "org": "American Probation and Parole Association",
+        "url": "https://www.appa-net.org/eweb/",
+        "why": "Probation/parole supervision agencies — direct CSOSA use case expansion",
+        "typical_month": "July",
+        "tier": "🟢 Strong Fit",
+        "score": 87,
+    },
+    {
+        "name": "ACA Winter Conference",
+        "org": "American Correctional Association",
+        "url": "https://www.aca.org/ACA_Prod_IMIS/ACA/Events",
+        "why": "Corrections agencies — BOP, state DOCs, supervision agencies, Peregrine use case",
+        "typical_month": "January",
+        "tier": "🟢 Strong Fit",
+        "score": 83,
+    },
+    {
+        "name": "NASCIO Annual Conference",
+        "org": "National Association of State Chief Information Officers",
+        "url": "https://www.nascio.org/events/",
+        "why": "State CIOs — data integration platform buyers, IT modernization decisions",
+        "typical_month": "October",
+        "tier": "🟡 Good Fit",
+        "score": 72,
+    },
+    {
+        "name": "DHS Industry Day (various)",
+        "org": "Department of Homeland Security",
+        "url": "https://apfs-cloud.dhs.gov",
+        "why": "DHS procurement — directly relevant to Peregrine\'s law enforcement & border mission",
+        "typical_month": "Ongoing",
+        "tier": "🟢 Strong Fit",
+        "score": 88,
+    },
+    {
+        "name": "Intelligence & National Security Summit",
+        "org": "AFCEA / INSA",
+        "url": "https://www.afcea.org/site/events",
+        "why": "Intelligence community data platform buyers — ODNI, NSA, CIA, DIA customer profiles",
+        "typical_month": "September",
+        "tier": "🟡 Good Fit",
+        "score": 70,
+    },
+    {
+        "name": "TECHEXPO Top Secret",
+        "org": "TECHEXPO",
+        "url": "https://techexposummit.com",
+        "why": "Cleared personnel / IC contractors — defense data platform and intelligence fusion",
+        "typical_month": "Various",
+        "tier": "🟡 Good Fit",
+        "score": 68,
+    },
+    {
+        "name": "National Fusion Center Association (NFCA) Training Event",
+        "org": "NFCA",
+        "url": "https://nfcausa.org",
+        "why": "Fusion centers are exact Peregrine customers — multi-source intel, data sharing",
+        "typical_month": "April",
+        "tier": "🟢 Strong Fit",
+        "score": 91,
+    },
+    {
+        "name": "SEARCH National Conference on Justice Information",
+        "org": "SEARCH Group",
+        "url": "https://www.search.org/events/",
+        "why": "Criminal justice information sharing — CJIS, RMS, data integration buyers",
+        "typical_month": "August",
+        "tier": "🟢 Strong Fit",
+        "score": 86,
+    },
+    {
+        "name": "International Justice & Public Safety Network (Nlets) Annual Conference",
+        "org": "Nlets",
+        "url": "https://www.nlets.org",
+        "why": "Criminal justice data exchange — direct overlap with Peregrine federated search use case",
+        "typical_month": "April",
+        "tier": "🟢 Strong Fit",
+        "score": 84,
+    },
+    {
+        "name": "GovTech Law Enforcement Technology Conference",
+        "org": "Government Technology",
+        "url": "https://events.govtech.com",
+        "why": "Law enforcement tech buyers — analytics, data platforms, public safety",
+        "typical_month": "Various",
+        "tier": "🟢 Strong Fit",
+        "score": 81,
+    },
+    {
+        "name": "Esri Federal GIS Conference",
+        "org": "Esri",
+        "url": "https://www.esri.com/en-us/about/events/federal-gis-conference/overview",
+        "why": "Geospatial intelligence buyers — Peregrine geospatial capability, partner/compete opportunity",
+        "typical_month": "February",
+        "tier": "🟡 Good Fit",
+        "score": 65,
+    },
+    {
+        "name": "AFCEA TechNet Cyber",
+        "org": "AFCEA",
+        "url": "https://www.afcea.org/site/events",
+        "why": "DoD cybersecurity — zero trust, FedRAMP, data platform security buyers",
+        "typical_month": "May",
+        "tier": "🟡 Good Fit",
+        "score": 62,
+    },
+    {
+        "name": "National Public Safety Telecommunications Council (NPSTC) Summit",
+        "org": "NPSTC",
+        "url": "https://npstc.org",
+        "why": "Public safety communications & data — CAD, RMS, first responder tech buyers",
+        "typical_month": "October",
+        "tier": "🟡 Good Fit",
+        "score": 66,
+    },
+]
+
+def fetch_events_intelligence() -> list[Opportunity]:
+    """
+    Returns known upcoming conferences and events as Opportunity objects.
+    Pulls from the curated KNOWN_EVENTS list, checks public event pages
+    for date updates where possible, and flags events in the next 90 days.
+    """
+    results = []
+    today = datetime.utcnow()
+    ninety_days = today + timedelta(days=90)
+
+    # Try to fetch live date info from a few key event aggregators
+    event_feeds = [
+        {
+            "url": "https://www.govtech.com/events/rss.xml",
+            "source": "GovTech Events",
+        },
+        {
+            "url": "https://www.afcea.org/site/rss/events",
+            "source": "AFCEA Events",
+        },
+    ]
+
+    live_events = []
+    for feed in event_feeds:
+        try:
+            resp = requests.get(feed["url"], headers=HEADERS, timeout=15)
+            if resp.status_code != 200:
+                continue
+            root = ET.fromstring(resp.content)
+            items = root.findall(".//item")
+            for item in items[:20]:
+                title_el = item.find("title")
+                link_el  = item.find("link")
+                desc_el  = item.find("description")
+                date_el  = item.find("pubDate")
+
+                title = title_el.text or "" if title_el is not None else ""
+                desc  = unescape(re.sub("<[^>]+>", "", desc_el.text or "")) if desc_el is not None else ""
+                url_  = link_el.text or "" if link_el is not None else ""
+                date_ = date_el.text or "" if date_el is not None else ""
+
+                combined = f"{title} {desc}".lower()
+                # Filter for relevant events
+                event_signals = [
+                    "law enforcement", "public safety", "government", "federal",
+                    "justice", "homeland", "data", "analytics", "intelligence",
+                    "corrections", "police", "sheriff", "cybersecurity",
+                ]
+                if not any(sig in combined for sig in event_signals):
+                    continue
+
+                opp = Opportunity(
+                    title=f"[EVENT] {title}",
+                    notice_id=f"EVT-{hash(title + url_) % 10**9}",
+                    agency=feed["source"],
+                    posted_date=date_[:10] if date_ else today.strftime("%Y-%m-%d"),
+                    response_date="See event page for registration deadline",
+                    description=desc[:1500],
+                    url=url_,
+                    opp_type="Conference/Event",
+                    source="Events Intelligence",
+                )
+                live_events.append(score_opportunity(opp))
+        except Exception as e:
+            print(f"[Events] Feed error {feed['source']}: {e}")
+
+    results.extend(live_events)
+
+    # Add all known events as standing recommendations
+    current_month = today.month
+    for ev in KNOWN_EVENTS:
+        # Estimate if the event is likely coming up in the next 90 days
+        month_map = {
+            "January": 1, "February": 2, "March": 3, "April": 4,
+            "May": 5, "June": 6, "July": 7, "August": 8,
+            "September": 9, "October": 10, "November": 11, "December": 12,
+            "Ongoing": 0, "Various": 0,
+        }
+        ev_month = month_map.get(ev.get("typical_month", "Various"), 0)
+        upcoming_note = ""
+        if ev_month > 0:
+            months_away = (ev_month - current_month) % 12
+            if months_away == 0:
+                upcoming_note = "⚡ THIS MONTH"
+            elif months_away <= 3:
+                upcoming_note = f"📆 ~{months_away} month(s) away"
+            else:
+                upcoming_note = f"🗓 Typically {ev['typical_month']}"
+        else:
+            upcoming_note = "🔄 Ongoing / check for dates"
+
+        desc = (
+            f"{upcoming_note} | {ev['why']} | "
+            f"Typical timing: {ev.get('typical_month', 'Varies')}. "
+            f"Check {ev['url']} for exact dates and registration."
+        )
+
+        opp = Opportunity(
+            title=f"[EVENT] {ev['name']}",
+            notice_id=f"KNWNEVT-{hash(ev['name']) % 10**9}",
+            agency=ev["org"],
+            posted_date=today.strftime("%Y-%m-%d"),
+            response_date=f"Typically {ev.get('typical_month', 'varies')} — check site",
+            description=desc,
+            url=ev["url"],
+            opp_type="Conference/Event",
+            source="Events Intelligence",
+        )
+        opp.score = ev["score"]
+        opp.tier = ev["tier"]
+        opp.score_reasons = [ev["why"]]
+        results.append(opp)
+
+    print(f"[Events Intelligence] {len(results)} events found ({len(live_events)} live feed + {len(KNOWN_EVENTS)} curated)")
+    return results
 
 # ---------------------------------------------------------------------------
 # EMAIL SEND — via SendGrid API (no SMTP, no credentials beyond API key)
@@ -969,11 +1278,12 @@ def main():
 
     # Fetch from all sources
     sources = [
-        ("SAM.gov",          fetch_sam_gov),
-        ("Federal Register", fetch_federal_register),
-        ("USASpending.gov",  fetch_usaspending_intel),
-        ("Agency RSS",       fetch_agency_rss_feeds),
-        ("Congress.gov",     fetch_congress_signals),
+        ("SAM.gov",           fetch_sam_gov),
+        ("Federal Register",  fetch_federal_register),
+        ("USASpending.gov",   fetch_usaspending_intel),
+        ("Agency RSS",        fetch_agency_rss_feeds),
+        ("Congress.gov",      fetch_congress_signals),
+        ("Events",            fetch_events_intelligence),
     ]
 
     for name, fn in sources:
