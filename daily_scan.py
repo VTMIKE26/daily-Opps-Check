@@ -310,12 +310,15 @@ CAPABILITY_CLUSTERS = [
     (
         "Search & Intelligence", 20,
         [
-            "search", "retrieval", "federated", "intelligence platform",
-            "investigative", "investigation", "link analysis",
-            "geospatial", "visualization", "situational awareness",
-            "real-time", "operational", "intelligence system",
-            "query", "knowledge management", "content management",
-            "records management", "document management",
+            "search capability", "search platform", "search system",
+            "search solution", "enterprise search", "federated search",
+            "information retrieval", "data retrieval", "document retrieval",
+            "investigative", "investigation platform", "link analysis",
+            "geospatial", "geospatial analysis", "visualization",
+            "situational awareness", "intelligence platform",
+            "intelligence system", "operational intelligence",
+            "query", "knowledge management",
+            "records management system", "document management system",
         ],
     ),
     (
@@ -333,21 +336,28 @@ CAPABILITY_CLUSTERS = [
     (
         "Software / SaaS / Cloud", 15,
         [
-            "software", "saas", "cloud", "platform", "application",
-            "system", "solution", "tool", "capability", "service",
-            "web-based", "cloud-based", "hosted", "subscription",
+            "software", "saas", "cloud platform", "cloud solution",
+            "cloud service", "cloud migration", "cloud-based",
+            "cloud hosting", "web application", "web-based",
+            "platform", "application", "it solution", "it system",
+            "it platform", "it service", "technology solution",
+            "technology platform", "technology system",
+            "hosted solution", "subscription service",
             "fedramp", "govcloud", "cjis", "nist", "zero trust",
-            "api", "integration", "interoperability", "modernization",
-            "digital transformation", "it modernization", "legacy",
+            "api", "integration services", "interoperability",
+            "modernization", "digital transformation",
+            "it modernization", "legacy modernization",
         ],
     ),
     (
         "AI / Machine Learning / Automation", 18,
         [
-            "artificial intelligence", "machine learning", "ai", "ml",
-            "automation", "automated", "predictive", "nlp",
-            "natural language", "algorithm", "model", "generative",
-            "large language", "llm", "decision support",
+            "artificial intelligence", "machine learning",
+            " ai ", "ai/ml", "ai solution", "ai platform", "ai system",
+            " ml ", "ml model", "automation", "automated",
+            "predictive", "nlp", "natural language", "algorithm",
+            "generative ai", "large language model", "llm",
+            "decision support",
         ],
     ),
 ]
@@ -372,6 +382,14 @@ HARD_EXCLUSIONS = [
     "attorney services", "legal representation",
     "financial audit services", "accounting services",
     "building maintenance services", "elevator maintenance",
+    # Physical hardware that Peregrine doesn't provide
+    "body-worn camera", "body worn camera", "bwc system",
+    "drone procurement", "uav system", "unmanned aerial",
+    "license plate reader hardware", "lpr hardware",
+    "surveillance camera installation", "cctv installation",
+    "weapon procurement", "taser procurement",
+    "vehicle maintenance", "fleet maintenance",
+    "furniture procurement", "office furniture",
 ]
 
 # Penalty signals — reduce score but don't exclude
@@ -428,108 +446,6 @@ PENALTY_SIGNALS = [
     ("translation only", -12),
 ]
 
-def score_opportunity(opp: Opportunity) -> Opportunity:
-    """
-    Score based on capability match. Very permissive — designed to surface
-    anything that could plausibly involve Peregrine's platform.
-    """
-    text = f"{opp.title} {opp.description} {opp.agency}".lower()
-    score = 0
-    reasons = []
-
-    # ── 1. Hard exclusion — only pure physical/commodity work ────────────────
-    for excl in HARD_EXCLUSIONS:
-        if excl.lower() in text:
-            opp.score = -1
-            opp.tier = "⛔ Not a Fit"
-            opp.score_reasons = [f"Excluded: '{excl}'"]
-            return opp
-
-    # ── 2. Expired check ─────────────────────────────────────────────────────
-    if is_expired(opp):
-        opp.score = -1
-        opp.tier = "⛔ Expired"
-        opp.score_reasons = [f"Response deadline passed ({opp.response_date})"]
-        return opp
-
-    # ── 3. Capability cluster matching ───────────────────────────────────────
-    clusters_matched = 0
-    for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
-        hits = [p for p in phrases if p.lower() in text]
-        if hits:
-            score += cap_points
-            clusters_matched += 1
-            top = sorted(hits, key=len, reverse=True)[:2]
-            reasons.append(f"✓ {cap_name}: '{top[0]}'" +
-                          (f" +{len(hits)-1}" if len(hits) > 1 else ""))
-
-    # ── 4. Penalty signals ───────────────────────────────────────────────────
-    for signal, penalty in PENALTY_SIGNALS:
-        if signal.lower() in text:
-            score += penalty
-            reasons.append(f"⚠ Penalty: '{signal}' ({penalty}pts)")
-
-    # ── 5. Agency bonus ──────────────────────────────────────────────────────
-    tier1 = ["bureau of alcohol", "atf", "department of justice", "doj",
-             "federal bureau of investigation", "fbi", "drug enforcement",
-             "dea", "u.s. marshals", "csosa", "court services"]
-    tier2 = ["department of homeland security", "dhs", "customs and border",
-             "cbp", "immigration and customs", "ice", "secret service",
-             "transportation security", "tsa", "odni", "defense intelligence",
-             "national security agency", "nsa", "cia"]
-    tier3 = ["bureau of prisons", "bop", "office of justice", "ojp",
-             "national institute of justice", "pretrial services",
-             "department of defense", "dod", "socom", "darpa", "fema",
-             "gsa", "department of veterans", "social security",
-             "department of state", "treasury"]
-
-    if any(a in text for a in tier1):
-        score += 15
-        reasons.append("✓ Tier 1 target agency")
-    elif any(a in text for a in tier2):
-        score += 10
-        reasons.append("✓ Tier 2 target agency")
-    elif any(a in text for a in tier3):
-        score += 5
-        reasons.append("✓ Tier 3 target agency")
-
-    # ── 6. Notice type bonus ─────────────────────────────────────────────────
-    bonuses = {
-        "RFI": 8, "Sources Sought": 8, "Pre-Solicitation": 5,
-        "Industry Day": 10, "Federal Register RFI": 7, "Award Intel": 3,
-    }
-    bonus = bonuses.get(opp.opp_type, 0)
-    if bonus:
-        score += bonus
-        labels = {
-            "Industry Day": "Industry Day — attend to shape requirements",
-            "RFI": "RFI — respond to shape the eventual RFP",
-            "Sources Sought": "Sources Sought — demonstrate capability now",
-            "Pre-Solicitation": "Pre-Solicitation — early engagement window",
-            "Federal Register RFI": "Federal Register RFI — respond to shape RFP",
-        }
-        if opp.opp_type in labels:
-            reasons.append(f"✓ {labels[opp.opp_type]}")
-
-    # ── 7. Tier assignment ───────────────────────────────────────────────────
-    score = max(score, 0)
-    if score >= 35:
-        tier = "🟢 Strong Fit"
-    elif score >= 10:
-        tier = "🟡 Good Fit"
-    elif score > 0:
-        tier = "🔵 Possible Fit"
-    else:
-        tier = "⚪ Low Fit"
-
-    opp.score = score
-    opp.tier = tier
-    opp.score_reasons = reasons if reasons else ["No capability match — review manually"]
-    return opp
-
-# ---------------------------------------------------------------------------
-# DATE UTILITIES
-# ---------------------------------------------------------------------------
 def parse_date_flexible(date_str: str) -> datetime | None:
     """Try multiple date formats and return a datetime or None."""
     if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
@@ -724,113 +640,6 @@ PENALTY_SIGNALS = [
     ("translation only", -12),
 ]
 
-def score_opportunity(opp: Opportunity) -> Opportunity:
-    """
-    Score based on genuine capability match against Peregrine's actual platform.
-    Hard exclusions only for clearly irrelevant physical/unrelated work.
-    Capability clusters use short common phrases that appear in real solicitations.
-    """
-    text = f"{opp.title} {opp.description} {opp.agency}".lower()
-    score = 0
-    reasons = []
-
-    # ── 1. Hard exclusion ────────────────────────────────────────────────────
-    for excl in HARD_EXCLUSIONS:
-        if excl.lower() in text:
-            opp.score = -1
-            opp.tier = "⛔ Not a Fit"
-            opp.score_reasons = [f"Excluded: unrelated work ('{excl}')"]
-            return opp
-
-    # ── 2. Expired check ─────────────────────────────────────────────────────
-    if is_expired(opp):
-        opp.score = -1
-        opp.tier = "⛔ Expired"
-        opp.score_reasons = [f"Response deadline passed ({opp.response_date})"]
-        return opp
-
-    # ── 3. Capability cluster matching ───────────────────────────────────────
-    clusters_matched = 0
-    matched_names = set()
-
-    for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
-        hits = [p for p in phrases if p.lower() in text]
-        if hits:
-            score += cap_points
-            clusters_matched += 1
-            matched_names.add(cap_name)
-            top = sorted(hits, key=len, reverse=True)[:2]
-            reasons.append(f"✓ {cap_name}: '{top[0]}'" +
-                          (f" +{len(hits)-1}" if len(hits) > 1 else ""))
-
-    # ── 4. Penalty signals ───────────────────────────────────────────────────
-    for signal, penalty in PENALTY_SIGNALS:
-        if signal.lower() in text:
-            score += penalty
-            reasons.append(f"⚠ Penalty: '{signal}' ({penalty}pts)")
-
-    # ── 5. Agency bonus (only when at least one cluster matched) ─────────────
-    if clusters_matched >= 1:
-        tier1 = ["bureau of alcohol", "atf", "department of justice", "doj",
-                 "federal bureau of investigation", "fbi", "drug enforcement",
-                 "dea", "u.s. marshals", "csosa", "court services and offender"]
-        tier2 = ["department of homeland security", "dhs", "customs and border",
-                 "cbp", "immigration and customs", "ice", "secret service",
-                 "transportation security", "tsa", "odni", "defense intelligence",
-                 "national security agency", "nsa"]
-        tier3 = ["bureau of prisons", "bop", "office of justice programs", "ojp",
-                 "national institute of justice", "pretrial services",
-                 "department of defense", "dod", "socom", "darpa", "fema", "gsa",
-                 "department of veterans", "social security", "department of state"]
-
-        if any(a in text for a in tier1):
-            score += 15
-            reasons.append("✓ Tier 1 target agency")
-        elif any(a in text for a in tier2):
-            score += 10
-            reasons.append("✓ Tier 2 target agency")
-        elif any(a in text for a in tier3):
-            score += 5
-            reasons.append("✓ Tier 3 target agency")
-
-    # ── 6. Notice type bonus (only when at least one cluster matched) ─────────
-    if clusters_matched >= 1:
-        bonuses = {
-            "RFI": 8, "Sources Sought": 8, "Pre-Solicitation": 5,
-            "Industry Day": 10, "Federal Register RFI": 7, "Award Intel": 3,
-        }
-        bonus = bonuses.get(opp.opp_type, 0)
-        if bonus:
-            score += bonus
-            labels = {
-                "Industry Day": "Industry Day — attend to shape requirements",
-                "RFI": "RFI — respond to shape the eventual RFP",
-                "Sources Sought": "Sources Sought — demonstrate capability now",
-                "Pre-Solicitation": "Pre-Solicitation — early engagement window",
-                "Federal Register RFI": "Federal Register RFI — respond to shape RFP",
-            }
-            if opp.opp_type in labels:
-                reasons.append(f"✓ {labels[opp.opp_type]}")
-
-    # ── 7. Tier assignment — generous thresholds ─────────────────────────────
-    score = max(score, 0)
-    if score >= 35:
-        tier = "🟢 Strong Fit"
-    elif score >= 10:
-        tier = "🟡 Good Fit"
-    elif score > 0:
-        tier = "🔵 Possible Fit"
-    else:
-        tier = "⚪ Low Fit"
-
-    opp.score = score
-    opp.tier = tier
-    opp.score_reasons = reasons if reasons else ["No capability match found — review manually"]
-    return opp
-
-# ---------------------------------------------------------------------------
-# DATE UTILITIES
-# ---------------------------------------------------------------------------
 def parse_date_flexible(date_str: str) -> datetime | None:
     """Try multiple date formats and return a datetime or None."""
     if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
@@ -1662,10 +1471,11 @@ def deduplicate_and_rank(opps: list[Opportunity]) -> list[Opportunity]:
             seen.add(key)
             unique.append(o)
 
+    # Keep everything except hard exclusions and expired — include Low Fit so
+    # Mike can see the full landscape and make his own call on edge cases
     filtered = [
         o for o in unique
-        if o.score > 0 and
-        o.tier not in ("⚪ Low Fit", "⛔ Not a Fit", "⛔ Expired")
+        if o.tier not in ("⛔ Not a Fit", "⛔ Expired")
     ]
     return sorted(filtered, key=lambda x: x.score, reverse=True)
 
@@ -1779,13 +1589,14 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     signals   = [o for o in opps if o.source == "Congress.gov"]
     events    = [o for o in opps if o.source == "Events Intelligence"]
 
+    low_fit = [o for o in non_events if o.tier == "⚪ Low Fit"]
     stats = [
-        ("Total", len(opps)),
+        ("Total", len(non_events)),
         ("🟢 Strong", len(tiers["strong"])),
         ("🟡 Good", len(tiers["good"])),
-        ("RFIs/SS", sum(1 for o in opps if o.opp_type in ("RFI", "Sources Sought", "Federal Register RFI"))),
-        ("Industry Days", len(ind_days)),
-        ("Events", len(events)),  # all curated + live events
+        ("🔵 Possible", len(tiers["possible"])),
+        ("⚪ Low Fit", len(low_fit)),
+        ("Events", len(events)),
     ]
     stat_cells = "".join(f"""
         <td style="text-align:center;padding:4px 14px;border-right:1px solid #e8e8e8">
@@ -1827,6 +1638,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
+  {build_section("⚪ Low Fit — Full Landscape View", [o for o in non_events if o.tier == "⚪ Low Fit"])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_section("🏛 Legislative Signals", signals[:5])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
@@ -2227,12 +2039,39 @@ def main():
     ranked = deduplicate_and_rank(all_opps)
     print(f"\n[Ranking] {len(ranked)} unique relevant opportunities after dedup+filter")
 
-    strong = sum(1 for o in ranked if "Strong" in o.tier)
-    good   = sum(1 for o in ranked if "Good" in o.tier)
+    # Exclude events from solicitation counts for subject line
+    solicitations = [o for o in ranked if o.source != "Events Intelligence"]
+    strong   = sum(1 for o in solicitations if "Strong" in o.tier)
+    good     = sum(1 for o in solicitations if "Good" in o.tier)
+    possible = sum(1 for o in solicitations if "Possible" in o.tier)
+
+    # Find the soonest deadline across strong/good fits for urgency signal
+    from datetime import datetime as _dt
+    urgent_deadlines = []
+    for o in solicitations:
+        if "Strong" in o.tier or "Good" in o.tier:
+            dt = parse_date_flexible(o.response_date)
+            if dt:
+                days = (dt - _dt.utcnow()).days
+                if 0 <= days <= 7:
+                    urgent_deadlines.append(days)
+
+    # Build dynamic subject line
+    if strong == 0 and good == 0:
+        subject = f"🦅 Peregrine Daily | No strong matches today — {possible} possible | {run_date}"
+    elif urgent_deadlines:
+        soonest = min(urgent_deadlines)
+        urgent_label = "today" if soonest == 0 else f"in {soonest}d"
+        subject = f"🔴 Peregrine Daily | {strong} Strong · {good} Good — deadline {urgent_label} | {run_date}"
+    elif strong >= 5:
+        subject = f"🚀 Peregrine Daily | {strong} Strong · {good} Good Fits | {run_date}"
+    elif strong >= 1:
+        subject = f"🦅 Peregrine Daily | {strong} Strong · {good} Good Fits | {run_date}"
+    else:
+        subject = f"🦅 Peregrine Daily | {good} Good Fits · {possible} Possible | {run_date}"
 
     # Build and send
     html = build_html_email(ranked, run_date, source_counts)
-    subject = f"🦅 Peregrine Daily — {strong} Strong · {good} Good Fits | {run_date}"
     send_email(html, subject)
 
     # Save local copy
