@@ -106,6 +106,29 @@ def is_expired(opp) -> bool:
             return dt < grace
     return False
 
+def clean_url(url: str, fallback: str = "") -> str:
+    """
+    Validate and clean a URL. Returns the URL if valid, fallback otherwise.
+    Ensures URLs start with http/https, strips whitespace, and handles
+    common malformed patterns from API responses.
+    """
+    if not url:
+        return fallback
+    url = url.strip()
+    # Must start with http or https
+    if not url.startswith(("http://", "https://")):
+        # Try prepending https
+        if url.startswith("//"):
+            url = "https:" + url
+        elif url.startswith("www."):
+            url = "https://" + url
+        else:
+            return fallback
+    # Basic sanity — no spaces, reasonable length
+    if " " in url or len(url) > 2000:
+        return fallback
+    return url
+
 
 # Peregrine's 6 core capability areas — what it actually sells and deploys
 CAPABILITY_CLUSTERS = [
@@ -475,7 +498,7 @@ def fetch_sam_gov() -> list[Opportunity]:
                     posted_date=item.get("postedDate", ""),
                     response_date=item.get("responseDeadLine", "TBD"),
                     description=(item.get("description", "") or "")[:2000],
-                    url=f"https://sam.gov/opp/{item.get('noticeId','')}/view",
+                    url=clean_url(f"https://sam.gov/opp/{item.get('noticeId','')}/view", "https://sam.gov/search"),
                     opp_type=label,
                     source="SAM.gov",
                     naics=item.get("naicsCode", ""),
@@ -547,7 +570,7 @@ def fetch_sam_gov() -> list[Opportunity]:
                     posted_date=item.get("postedDate", ""),
                     response_date=item.get("responseDeadLine", "TBD"),
                     description=(item.get("description", "") or "")[:2000],
-                    url=f"https://sam.gov/opp/{item.get('noticeId','')}/view",
+                    url=clean_url(f"https://sam.gov/opp/{item.get('noticeId','')}/view", "https://sam.gov/search"),
                     opp_type="Industry Day",
                     source="SAM.gov",
                     naics=item.get("naicsCode", ""),
@@ -629,7 +652,7 @@ def fetch_federal_register() -> list[Opportunity]:
                 )
                 pub_date = doc.get("publication_date", "")
                 comment_date = doc.get("comments_close_on", doc.get("comment_date", "TBD"))
-                url = doc.get("html_url", f"https://www.federalregister.gov/documents/{doc_id}")
+                url = clean_url(doc.get("html_url", "") or f"https://www.federalregister.gov/documents/{doc_id}", "https://www.federalregister.gov")
 
                 # Detect if this is actually an RFI/sources sought
                 title_lower = title.lower()
@@ -767,7 +790,7 @@ def fetch_usaspending_intel() -> list[Opportunity]:
                     posted_date=start or end_date,
                     response_date="Watch for recompete",
                     description=desc_full,
-                    url=f"https://www.usaspending.gov/award/{award_id}/",
+                    url=clean_url(f"https://www.usaspending.gov/award/{award_id}/", "https://www.usaspending.gov/search"),
                     opp_type="Award Intel",
                     source="USASpending.gov",
                 )
@@ -855,7 +878,7 @@ def fetch_agency_rss_feeds() -> list[Opportunity]:
                     posted_date=date_[:10] if date_ else datetime.utcnow().strftime("%Y-%m-%d"),
                     response_date="See posting",
                     description=desc[:2000],
-                    url=url_,
+                    url=clean_url(url_, ""),
                     opp_type=opp_type,
                     source=f"RSS: {agency}",
                 )
@@ -968,11 +991,11 @@ def deduplicate_and_rank(opps: list[Opportunity]) -> list[Opportunity]:
             seen.add(key)
             unique.append(o)
 
-    # Keep everything except hard exclusions and expired — include Low Fit so
-    # Mike can see the full landscape and make his own call on edge cases
+    # Keep only items with at least one capability cluster match (score > 0)
+    # Drop: hard exclusions, expired, and items with zero capability signal
     filtered = [
         o for o in unique
-        if o.tier not in ("⛔ Not a Fit", "⛔ Expired")
+        if o.score > 0 and o.tier not in ("⛔ Not a Fit", "⛔ Expired")
     ]
     return sorted(filtered, key=lambda x: x.score, reverse=True)
 
@@ -1054,8 +1077,7 @@ def opp_card(o: Opportunity) -> str:
         <strong>Why it fits:</strong>
         <ul style="margin:3px 0 0 14px;padding:0;">{reasons_html}</ul>
       </div>
-      <a href="{o.url}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;
-         padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;">View on Source →</a>
+      {f'<a href="{o.url}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;">View on Source →</a>' if o.url else '<span style="font-size:12px;color:#888;font-style:italic;">No link available</span>'}
     </div>"""
 
 def build_section(title: str, opps: list[Opportunity]) -> str:
@@ -1114,7 +1136,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     signals   = [o for o in opps if o.source == "Congress.gov"]
     events    = [o for o in opps if o.source == "Events Intelligence"]
 
-    low_fit = [o for o in non_events if o.tier == "⚪ Low Fit"]
+    low_fit = [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0 and any(r.startswith("✓") for r in o.score_reasons)]
     stats = [
         ("Total", len(non_events)),
         ("🟢 Strong", len(tiers["strong"])),
@@ -1163,7 +1185,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
-  {build_section("⚪ Low Fit — No Direct Capability Match (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit"])}
+  {build_section("⚪ Low Fit — Weak Signal (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and any(r.startswith("✓") for r in o.score_reasons)])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
@@ -1429,7 +1451,7 @@ def fetch_events_intelligence() -> list[Opportunity]:
                     posted_date=date_[:10] if date_ else today.strftime("%Y-%m-%d"),
                     response_date="See event page for registration deadline",
                     description=desc[:1500],
-                    url=url_,
+                    url=clean_url(url_, ""),
                     opp_type="Conference/Event",
                     source="Events Intelligence",
                 )
