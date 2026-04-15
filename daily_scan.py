@@ -681,35 +681,45 @@ def fetch_federal_register() -> list[Opportunity]:
 # so we know who's spending, on what, and can pursue follow-on/recompete opps
 # ---------------------------------------------------------------------------
 def fetch_usaspending_intel() -> list[Opportunity]:
+    """
+    Searches USASpending.gov for recent contract awards — competitive intel.
+    Shows who is spending in Peregrine's space, at which agencies, so you can
+    identify recompete opportunities and warm target accounts.
+    NO NAICS filter — too restrictive. Short single keywords only.
+    """
     results = []
     today = datetime.utcnow()
-    start_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
+    # Use fiscal year to date for broader coverage
+    start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
     end_date = today.strftime("%Y-%m-%d")
 
+    # ONE keyword per batch — short terms that actually appear in award descriptions
+    # Multi-word phrases like "law enforcement analytics" almost never match
     keyword_batches = [
-        ["law enforcement analytics"],
-        ["data integration platform"],
-        ["public safety software"],
+        ["law enforcement software"],
+        ["public safety platform"],
+        ["data integration"],
         ["crime analytics"],
         ["community supervision"],
-        ["federated search"],
         ["offender management"],
-        ["investigative platform"],
-        ["artificial intelligence law enforcement"],
+        ["investigative software"],
         ["palantir"],
-        ["data platform modernization"],
+        ["data analytics platform"],
+        ["records management system"],
+        ["criminal justice software"],
+        ["corrections software"],
     ]
 
     for keywords in keyword_batches:
         payload = {
             "subawards": False,
-            "limit": 15,
+            "limit": 10,
             "page": 1,
             "filters": {
                 "keywords": keywords,
                 "award_type_codes": ["A", "B", "C", "D"],
                 "time_period": [{"start_date": start_date, "end_date": end_date}],
-                "naics_codes": NAICS_CODES,
+                # NO naics_codes filter — it kills results
             },
             "fields": [
                 "Award ID", "Recipient Name", "Start Date", "End Date",
