@@ -403,12 +403,37 @@ HARD_EXCLUSIONS = [
     "office supplies", "clothing", "uniform", "laundry",
     "refuse collection", "shipping", "freight",
     "aircraft maintenance", "ship repair", "vehicle fleet",
-    # Weapons / hardware
-    "ammunition supply", "firearms purchase", "weapon system",
-    "hardware procurement", "body armor purchase",
-    # Pure IT infrastructure (not platform)
-    "network cabling", "help desk staffing", "desktop support",
-    "printer maintenance", "telephone system installation",
+    # Hardware procurement (Peregrine is software-only)
+    "hardware procurement", "server hardware", "network hardware",
+    "laptop purchase", "desktop purchase", "tablet purchase",
+    "computer purchase", "printer purchase", "monitor purchase",
+    "switch procurement", "router procurement", "firewall appliance",
+    "storage hardware", "rack equipment",
+    "network cabling", "structured cabling",
+    "body-worn camera purchase", "body camera hardware",
+    "radio hardware", "radio procurement", "radio system purchase",
+    "vehicle purchase", "vehicle acquisition", "fleet vehicle",
+    "body armor", "ballistic vest", "tactical equipment purchase",
+    "weapon purchase", "firearm purchase", "ammunition",
+    "sensor hardware", "drone hardware", "uav procurement",
+    # Medical / pharma / lab
+    "medical supply", "pharmaceutical", "drug manufacturing",
+    "clinical trial", "healthcare staffing", "nursing",
+    "laboratory equipment", "lab supplies", "reagent",
+    # Staffing / HR (pure body shop)
+    "staffing agency", "temp staff", "temporary personnel",
+    "recruitment services", "executive search firm",
+    # Physical logistics
+    "office supplies", "clothing", "uniform", "laundry",
+    "refuse collection", "shipping", "freight", "moving services",
+    "aircraft maintenance", "ship repair", "engine overhaul",
+    # Low-signal IT services
+    "help desk staffing", "printer maintenance",
+    "telephone system installation", "audio visual installation",
+    # Professional services unrelated to Peregrine
+    "legal services", "legal counsel", "attorney services",
+    "financial audit", "accounting services",
+    "translation services", "interpretation services",
 ]
 
 # Penalty signals — reduce score if present (suggest mismatch but don't hard exclude)
@@ -522,15 +547,30 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
             if label:
                 reasons.append(f"✓ {label}")
 
-    # ── 7. Require minimum substance for Strong Fit ──────────────────────────
-    # A single weak cluster match shouldn't hit Strong — need 2+ clusters
-    if clusters_matched < 2 and score >= 50:
-        score = 49  # Cap at Good Fit if only one cluster matched
+    # ── 7. Minimum cluster rule — with exception for highly specific asks ────
+    # Single-cluster matches are usually still worth seeing if the cluster
+    # is highly specific to Peregrine's unique capabilities.
+    specific_clusters = {
+        "Federated Search",
+        "Entity Resolution & Record Intelligence",
+        "Corrections & Community Supervision",
+        "Platform Modernization / Incumbent Replacement",
+    }
+    matched_cluster_names = set()
+    for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
+        if any(p.lower() in text for p in phrases):
+            matched_cluster_names.add(cap_name)
+    is_specific_single = (
+        clusters_matched == 1 and
+        bool(matched_cluster_names & specific_clusters)
+    )
+    if clusters_matched < 2 and not is_specific_single and score >= 40:
+        score = 39  # Cap at Good Fit if single non-specific cluster
 
-    # ── 8. Assign tier ───────────────────────────────────────────────────────
-    if score >= 50:
+    # ── 8. Assign tier — widened thresholds ─────────────────────────────────
+    if score >= 40:
         tier = "🟢 Strong Fit"
-    elif score >= 25:
+    elif score >= 15:
         tier = "🟡 Good Fit"
     elif score > 0:
         tier = "🔵 Possible Fit"
@@ -1025,7 +1065,11 @@ def deduplicate_and_rank(opps: list[Opportunity]) -> list[Opportunity]:
             seen.add(key)
             unique.append(o)
 
-    filtered = [o for o in unique if o.score > 0]
+    filtered = [
+        o for o in unique
+        if o.score > 0 and
+        o.tier not in ("⚪ Low Fit", "⛔ Not a Fit", "⛔ Expired")
+    ]
     return sorted(filtered, key=lambda x: x.score, reverse=True)
 
 
