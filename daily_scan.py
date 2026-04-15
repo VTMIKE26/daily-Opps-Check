@@ -281,20 +281,17 @@ def fetch_federal_register() -> list[Opportunity]:
 
     for term in search_terms:
         try:
-            params = {
-                "conditions[term]": term,
-                "conditions[publication_date][gte]": since,
-                "conditions[type][]": "NOTICE",
-                "per_page": 20,
-                "order": "newest",
-                "fields[]": [
-                    "document_number", "title", "abstract", "publication_date",
-                    "agencies", "html_url", "comment_date", "comments_close_on"
-                ],
-            }
+            url_params = (
+                f"conditions[term]={requests.utils.quote(term)}"
+                f"&conditions[publication_date][gte]={since}"
+                f"&conditions[type][]=NOTICE"
+                f"&per_page=20&order=newest"
+                f"&fields[]=document_number&fields[]=title&fields[]=abstract"
+                f"&fields[]=publication_date&fields[]=agencies"
+                f"&fields[]=html_url&fields[]=comments_close_on"
+            )
             resp = requests.get(
-                "https://www.federalregister.gov/api/v1/documents.json",
-                params=params,
+                f"https://www.federalregister.gov/api/v1/documents.json?{url_params}",
                 headers={"User-Agent": HEADERS["User-Agent"]},
                 timeout=30
             )
@@ -365,14 +362,14 @@ def fetch_federal_register() -> list[Opportunity]:
 def fetch_usaspending_intel() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     end_date = today.strftime("%Y-%m-%d")
 
     keyword_batches = [
-        ["public safety analytics", "law enforcement data"],
-        ["situational awareness platform", "data fusion government"],
-        ["crime analytics", "predictive policing software"],
-        ["emergency management software", "incident command platform"],
+        ["public safety"],
+        ["law enforcement software"],
+        ["data analytics government"],
+        ["emergency management technology"],
     ]
 
     for keywords in keyword_batches:
@@ -457,19 +454,16 @@ def fetch_agency_rss_feeds() -> list[Opportunity]:
     # These are public RSS/Atom feeds from federal agency sites
     feeds = [
         {
-            "url": "https://www.dhs.gov/dhs-procurement-innovation-lab/rss.xml",
-            "agency": "DHS Procurement Innovation Lab",
-            "fallback_url": "https://www.dhs.gov/sites/default/files/publications/dhs-procurement-innovation-lab-rss.xml",
-        },
-        # GSA Interact is the community for IT Schedule; they post industry events
-        {
-            "url": "https://interact.gsa.gov/forum/upcoming-industry-events/feed",
-            "agency": "GSA",
-        },
-        # DHS has a broad news/announcements feed that includes procurement notices
-        {
-            "url": "https://www.dhs.gov/rss-feeds",
+            "url": "https://feeds.feedburner.com/dhs/zOAi",
             "agency": "DHS",
+        },
+        {
+            "url": "https://www.govinfo.gov/rss/pkg.xml",
+            "agency": "GovInfo",
+        },
+        {
+            "url": "https://www.gsa.gov/about-gsa/newsroom/rss-feeds",
+            "agency": "GSA",
         },
     ]
 
@@ -546,12 +540,12 @@ def fetch_congress_signals() -> list[Opportunity]:
     # Congress.gov offers public RSS feeds for committee activities
     committee_feeds = [
         {
-            "url": "https://www.congress.gov/rss/committee-reports.xml",
-            "label": "Congressional Committee Reports",
+            "url": "https://www.congress.gov/rss/most-recent-bills.xml",
+            "label": "Most Recent Bills",
         },
         {
-            "url": "https://www.congress.gov/rss/most-viewed-bills.xml",
-            "label": "Most Viewed Bills",
+            "url": "https://www.congress.gov/rss/most-recent-actions.xml",
+            "label": "Most Recent Actions",
         },
     ]
 
