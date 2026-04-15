@@ -1154,14 +1154,12 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     <table cellpadding="0" cellspacing="0"><tbody>{source_rows}</tbody></table>
   </div>
 
-  {build_section("🟢 Strong Fit — Act Now", tiers["strong"])}
-  {build_section("🟡 Good Fit — Review Today", tiers["good"])}
-  {build_section("📅 Industry Days (SAM.gov)", ind_days)}
-  {build_section("🎤 Conferences & Events to Attend", sorted(events, key=lambda x: x.score, reverse=True)[:15])}
-  {build_section("📰 Federal Register RFIs", [o for o in fr_rfis if o.opp_type != "Industry Day" and "Strong" not in o.tier and "Good" not in o.tier])}
+  {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
+  {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
+  {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_section("🏛 Legislative Signals", signals[:5])}
-  {build_section("🔵 Possible Fit — Scan Manually", tiers["possible"])}
+  {build_section("🎤 Events & Conferences to Attend", sorted([o for o in opps if o.source == "Events Intelligence"], key=lambda x: x.score, reverse=True))}
 
   <!-- Footer -->
   <div style="text-align:center;font-size:11px;color:#bbb;margin-top:24px;padding:20px;border-top:1px solid #e0e0e0">
