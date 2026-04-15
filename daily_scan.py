@@ -1153,7 +1153,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
-  {build_section("⚪ Low Fit — Worth a Look", [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0])}
+  {build_section("⚪ Low Fit — No Direct Capability Match (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit"])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
