@@ -49,26 +49,91 @@ HEADERS = {
 # PEREGRINE FIT PROFILE
 # ---------------------------------------------------------------------------
 HIGH_VALUE_KEYWORDS = [
-    "public safety", "law enforcement", "data integration", "data fusion",
-    "real-time analytics", "decision support", "situational awareness",
-    "emergency management", "crime analytics", "predictive analytics",
-    "FedRAMP", "mission critical", "operational intelligence",
-    "data platform", "artificial intelligence", "machine learning",
-    "CJIS", "justice information", "first responder", "homeland security",
-    "geospatial", "visualization", "real-time dashboard",
-    "data driven policing", "smart policing", "officer wellness",
-    "incident management", "investigative analytics",
+    # Core mission — law enforcement
+    "federated search", "enterprise search", "investigative platform",
+    "law enforcement analytics", "crime gun intelligence", "CGIC",
+    "NIBIN", "eTrace", "gun violence", "ballistic intelligence",
+    "investigative workflow", "intelligence platform",
+    # Palantir replacement signals — HIGH priority
+    "Palantir", "Gotham", "Foundry", "alternative to Palantir",
+    "replace Palantir", "Palantir replacement", "data platform modernization",
+    "legacy data platform", "platform consolidation", "enterprise data platform",
+    "data platform migration", "incumbent replacement",
+    # General data integration — broad federal market
+    "data integration platform", "data fusion", "data ingestion",
+    "enterprise data integration", "data unification", "unified data environment",
+    "data silo", "siloed systems", "disparate data sources",
+    "multi-source data", "data harmonization", "data normalization",
+    "master data management", "MDM",
+    # Entity & record capabilities
+    "entity resolution", "record deduplication", "record linkage",
+    "ontology", "knowledge graph", "link analysis",
+    "graph analytics", "relationship mapping",
+    # Analytics & visualization
+    "geospatial analysis", "geospatial intelligence", "GEOINT",
+    "situational awareness", "real-time dashboard", "operational dashboard",
+    "temporal analysis", "proactive alerting", "geofence",
+    "heat map", "predictive analytics", "advanced analytics",
+    # Security & compliance
+    "CJIS", "AWS GovCloud", "FedRAMP High", "FedRAMP Moderate",
+    "NIST SP 800-53", "ICAM", "SAML", "SSO",
+    "zero trust", "Section 508", "role-based access", "attribute-based access",
+    # Public safety operations
+    "records management system", "RMS", "CAD", "computer-aided dispatch",
+    "public safety", "first responder", "operational intelligence",
+    # Agency-specific — ATF
+    "ATF", "Bureau of Alcohol Tobacco", "crime gun", "NIBIN lead", "trace data",
+    # Corrections & supervision
+    "community supervision", "probation", "parole", "reentry",
+    "corrections", "offender management", "supervision officer",
+    "court services", "pretrial", "case supervision",
+    "Smart21", "CSOSA", "supervision data",
+    # Platform capabilities
+    "OCR", "optical character recognition", "document intelligence",
+    "walk-up usable", "mobile application", "biometric authentication",
+    # Intelligence community / defense data
+    "all-source analytics", "multi-INT", "intelligence fusion",
+    "targeting platform", "mission data", "operational data environment",
+    "common operating picture", "COP", "command and control",
 ]
 
 MEDIUM_VALUE_KEYWORDS = [
-    "data analytics", "cloud platform", "SaaS", "software as a service",
-    "data management", "API", "interoperability", "digital transformation",
-    "modernization", "cybersecurity", "AWS GovCloud", "zero trust",
-    "state and local", "DoD", "DHS", "DOJ", "FBI", "ATF", "DEA",
-    "intelligence", "sensor fusion", "IoT", "smart city",
-    "data warehouse", "ETL", "pipeline", "dashboard", "AI/ML",
-    "natural language processing", "NLP", "computer vision",
-    "records management", "CAD", "computer-aided dispatch",
+    # General tech
+    "SaaS", "software as a service", "enterprise platform",
+    "data analytics", "data management", "interoperability",
+    "API integration", "cloud platform", "digital transformation",
+    "IT modernization", "legacy modernization", "dashboard", "visualization",
+    # AI/ML
+    "artificial intelligence", "machine learning", "AI/ML",
+    "natural language processing", "NLP", "predictive analytics",
+    "automation", "anomaly detection", "generative AI", "large language model",
+    # Data platform signals
+    "data lake", "data warehouse", "ETL", "ELT", "data pipeline",
+    "data fabric", "data mesh", "data catalog", "metadata management",
+    "data governance", "data quality", "data lineage",
+    "cloud migration", "hybrid cloud", "multi-cloud",
+    # Law enforcement adjacent
+    "law enforcement", "public safety", "criminal justice",
+    "emergency management", "homeland security", "intelligence",
+    "investigative", "surveillance", "gang", "violent crime",
+    "body camera", "evidence management", "digital evidence",
+    # Agencies (non-ATF)
+    "DOJ", "FBI", "DEA", "Marshal", "CBP", "ICE", "TSA",
+    "DHS", "DoD", "Army", "Navy", "Air Force", "ODNI",
+    "FEMA", "police department", "sheriff", "state police",
+    # Contract vehicles
+    "NASA SEWP", "SEWP", "GSA Schedule", "small business set-aside",
+    "8(a)", "HUBZone", "SDVOSB", "WOSB",
+    # Corrections/justice
+    "justice system", "recidivism", "social services", "reintegration",
+    "court order", "supervision program", "offender",
+    # Data infrastructure
+    "data model", "SharePoint", "SQL database", "file share",
+    "near real time", "audit log", "retention policy",
+    "commercial item", "annual subscription",
+    # Competitors / market signals
+    "Palantir alternative", "IBM i2", "Esri", "Tableau",
+    "data visualization platform", "analytics platform",
 ]
 
 NEGATIVE_KEYWORDS = [
@@ -76,35 +141,75 @@ NEGATIVE_KEYWORDS = [
     "furniture", "vehicle maintenance", "facilities management", "printing",
     "audio visual installation", "base operations", "custodial",
     "grounds maintenance", "pest control", "generator", "electrical install",
+    "medical supply", "pharmaceutical", "staffing agency", "temp staff",
+    "office supplies", "clothing", "uniform", "laundry", "refuse",
+    "aircraft maintenance", "ship repair", "ammunition supply",
 ]
 
 NAICS_CODES = [
-    "541511",  # Custom Computer Programming
-    "541512",  # Computer Systems Design
-    "541519",  # Other Computer Related
-    "541715",  # R&D Physical Sciences
-    "518210",  # Data Processing and Hosting
-    "519130",  # Internet Publishing / Web Portals
-    "541690",  # Other Scientific/Technical Consulting
+    "513210",  # Software Publishers — Peregrine's primary NAICS
+    "541511",  # Custom Computer Programming Services
+    "541512",  # Computer Systems Design Services
+    "541519",  # Other Computer Related Services
+    "518210",  # Data Processing, Hosting, and Related Services
+    "541690",  # Other Scientific and Technical Consulting
+    "541715",  # R&D in Physical, Engineering, and Life Sciences
+    "541614",  # Process, Physical Distribution, and Logistics Consulting
+    "519130",  # Internet Publishing and Web Search Portals
+    "561611",  # Investigation Services
+    "561621",  # Security Systems Services
+    "923120",  # Administration of Public Health Programs
+    "922150",  # Parole Offices and Probation Offices
+    "922110",  # Courts
+    "922120",  # Police Protection
+    "922190",  # Other Justice, Public Order, and Safety Activities
 ]
 
 TARGET_AGENCIES = [
-    "Department of Homeland Security", "DHS",
+    # Tier 1 — active relationships / RFIs submitted
+    "Bureau of Alcohol, Tobacco, Firearms", "ATF",
     "Department of Justice", "DOJ",
     "Federal Bureau of Investigation", "FBI",
     "Drug Enforcement Administration", "DEA",
-    "Bureau of Alcohol, Tobacco", "ATF",
-    "Department of Defense", "DoD",
-    "Department of the Army", "Department of the Navy", "Department of the Air Force",
-    "Office of the Director of National Intelligence", "ODNI",
+    "U.S. Marshals", "USMS",
+    "Court Services and Offender Supervision", "CSOSA",
+    # Tier 2 — law enforcement / intelligence / border
+    "Department of Homeland Security", "DHS",
     "Customs and Border Protection", "CBP",
-    "Secret Service", "U.S. Marshals",
-    "Transportation Security Administration", "TSA",
     "Immigration and Customs Enforcement", "ICE",
+    "Secret Service", "USSS",
+    "Transportation Security Administration", "TSA",
+    "Office of the Director of National Intelligence", "ODNI",
+    "Defense Intelligence Agency", "DIA",
+    "National Security Agency", "NSA",
+    "Central Intelligence Agency", "CIA",
+    # Tier 3 — corrections, justice, social services
+    "Pretrial Services Agency", "PSA",
+    "Bureau of Prisons", "BOP",
+    "Office of Justice Programs", "OJP",
+    "National Institute of Justice", "NIJ",
+    "Office of Juvenile Justice", "OJJDP",
+    "Office of National Drug Control", "ONDCP",
+    # Tier 4 — DoD / defense data consumers
+    "Department of Defense", "DoD",
+    "Department of the Army", "Department of the Navy",
+    "Department of the Air Force", "Space Force",
+    "Defense Advanced Research Projects", "DARPA",
+    "Special Operations Command", "SOCOM",
+    "U.S. Northern Command", "NORTHCOM",
+    # Tier 5 — broader federal data platform buyers
+    "Federal Emergency Management Agency", "FEMA",
     "General Services Administration", "GSA",
     "Department of Health and Human Services", "HHS",
     "Centers for Disease Control", "CDC",
-    "Federal Emergency Management Agency", "FEMA",
+    "Social Security Administration", "SSA",
+    "Department of Veterans Affairs", "VA",
+    "Department of State",
+    "Department of the Treasury",
+    # State / local
+    "police department", "sheriff", "state police",
+    "public safety", "law enforcement agency",
+    "probation", "parole", "corrections", "supervision agency",
 ]
 
 # ---------------------------------------------------------------------------
@@ -224,7 +329,35 @@ def fetch_sam_gov() -> list[Opportunity]:
             print(f"[SAM.gov] Error fetching {label}: {e}")
 
     # Also run broad keyword search for industry days 60 days out
-    for kw in ["public safety data analytics", "law enforcement AI", "data integration emergency"]:
+    for kw in [
+        # Law enforcement / public safety
+        "federated search law enforcement",
+        "crime gun intelligence platform",
+        "investigative data integration",
+        "NIBIN analytics platform",
+        "law enforcement SaaS",
+        "public safety data platform",
+        # Palantir replacement signals
+        "data platform replacement",
+        "enterprise intelligence platform",
+        "analytics platform modernization",
+        "legacy platform migration",
+        # General data integration — wide net
+        "data integration platform federal",
+        "enterprise data unification",
+        "multi-source data analytics",
+        "data fusion platform",
+        "disparate data sources integration",
+        # Corrections / supervision
+        "community supervision data platform",
+        "probation parole data integration",
+        "corrections intelligence platform",
+        "offender management analytics",
+        # Defense / intel
+        "operational intelligence platform",
+        "mission data analytics",
+        "all source analytics",
+    ]:
         try:
             resp = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
@@ -268,13 +401,29 @@ def fetch_federal_register() -> list[Opportunity]:
     since = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     search_terms = [
-        "request for information public safety data",
-        "sources sought law enforcement analytics",
-        "request for information data integration",
-        "industry day public safety technology",
-        "sources sought artificial intelligence law enforcement",
-        "request for information situational awareness",
-        "sources sought emergency management platform",
+        # Law enforcement
+        "request for information federated search law enforcement",
+        "sources sought investigative analytics platform",
+        "request for information crime gun intelligence",
+        "sources sought data integration public safety",
+        "request for information CJIS compliant platform",
+        "sources sought NIBIN analytics",
+        # Palantir replacement / general data platform
+        "request for information enterprise data platform",
+        "sources sought data integration platform",
+        "request for information analytics modernization",
+        "sources sought data unification platform",
+        "request for information data fusion platform",
+        # Corrections / supervision
+        "sources sought community supervision data",
+        "request for information corrections data integration",
+        "sources sought probation parole platform",
+        "request for information offender management",
+        # Defense / intel
+        "request for information operational intelligence",
+        "sources sought mission analytics platform",
+        "industry day data integration federal",
+        "request for information FedRAMP High data platform",
     ]
 
     seen_ids = set()
@@ -366,10 +515,17 @@ def fetch_usaspending_intel() -> list[Opportunity]:
     end_date = today.strftime("%Y-%m-%d")
 
     keyword_batches = [
-        ["public safety"],
-        ["law enforcement software"],
-        ["data analytics government"],
-        ["emergency management technology"],
+        ["law enforcement analytics platform"],
+        ["federated search government"],
+        ["crime intelligence platform"],
+        ["public safety data integration"],
+        ["investigative software"],
+        ["community supervision platform"],
+        ["corrections data analytics"],
+        ["enterprise data integration platform"],
+        ["data fusion analytics"],
+        ["operational intelligence platform"],
+        ["data platform modernization"],
     ]
 
     for keywords in keyword_batches:
