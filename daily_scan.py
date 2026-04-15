@@ -18,27 +18,27 @@ import os
 import re
 import json
 import time
-import smtplib
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from dataclasses import dataclass, field
 from typing import Optional
 from html import unescape
 from urllib.parse import urlencode
 
 # ---------------------------------------------------------------------------
-# CONFIGURATION — set as environment variables or edit here
+# CONFIGURATION — only 3 secrets needed
 # ---------------------------------------------------------------------------
-SAM_API_KEY    = os.environ.get("SAM_API_KEY", "YOUR_SAM_API_KEY")
-EMAIL_FROM     = os.environ.get("EMAIL_FROM", "alerts@yourdomain.com")
-EMAIL_TO       = os.environ.get("EMAIL_TO", "you@yourdomain.com")
-SMTP_HOST      = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT      = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER      = os.environ.get("SMTP_USER", "alerts@yourdomain.com")
-SMTP_PASSWORD  = os.environ.get("SMTP_PASSWORD", "YOUR_APP_PASSWORD")
+SAM_API_KEY       = os.environ.get("SAM_API_KEY", "")
+SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
+EMAIL_TO          = os.environ.get("EMAIL_TO", "mike.kelly@peregrine.io")
+EMAIL_FROM        = os.environ.get("EMAIL_FROM", "mike.kelly@peregrine.io")
+
+# Debug output — printed in GitHub Actions logs (secrets are masked automatically)
+print(f"[Config] SAM_API_KEY set:      {'YES' if SAM_API_KEY else 'NO - SAM.gov results will be empty'}")
+print(f"[Config] SENDGRID_API_KEY set: {'YES' if SENDGRID_API_KEY else 'NO - will fail at send step'}")
+print(f"[Config] EMAIL_TO:             {EMAIL_TO}")
+print(f"[Config] EMAIL_FROM:           {EMAIL_FROM}")
 
 HEADERS = {
     "User-Agent": "PeregrineOpportunityScanner/2.0 (federal procurement research; contact@peregrine.io)",
@@ -768,22 +768,41 @@ def build_html_email(opps: list[Opportunity], run_date: str,
 
 
 # ---------------------------------------------------------------------------
-# EMAIL SEND
+# EMAIL SEND — via SendGrid API (no SMTP, no credentials beyond API key)
 # ---------------------------------------------------------------------------
 def send_email(html_body: str, subject: str):
-    recipients = [r.strip() for r in EMAIL_TO.split(",")]
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = EMAIL_FROM
-    msg["To"]      = ", ".join(recipients)
-    msg.attach(MIMEText(html_body, "html"))
+    if not SENDGRID_API_KEY or SENDGRID_API_KEY == "YOUR_SENDGRID_API_KEY":
+        raise RuntimeError("SENDGRID_API_KEY is not set or is still the placeholder value.")
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASSWORD)
-        server.sendmail(EMAIL_FROM, recipients, msg.as_string())
-    print(f"[Email] Sent to {', '.join(recipients)}")
+    recipients = [r.strip() for r in EMAIL_TO.split(",")]
+    print(f"[Email] Sending to {recipients} via SendGrid...")
+
+    payload = {
+        "personalizations": [
+            {
+                "to": [{"email": r} for r in recipients],
+                "subject": subject,
+            }
+        ],
+        "from": {"email": EMAIL_FROM, "name": "Peregrine Federal Scanner"},
+        "subject": subject,
+        "content": [{"type": "text/html", "value": html_body}],
+    }
+
+    resp = requests.post(
+        "https://api.sendgrid.com/v3/mail/send",
+        headers={
+            "Authorization": f"Bearer {SENDGRID_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    if resp.status_code == 202:
+        print(f"[Email] Successfully sent to {', '.join(recipients)}")
+    else:
+        raise RuntimeError(f"SendGrid error {resp.status_code}: {resp.text}")
 
 
 # ---------------------------------------------------------------------------
