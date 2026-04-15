@@ -1027,8 +1027,7 @@ def fetch_sam_gov() -> list[Opportunity]:
             resp = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
                 params={"api_key": SAM_API_KEY, "postedFrom": from_date,
-                        "postedTo": to_date, "noticetype": code, "limit": 100,
-                        
+                        "postedTo": to_date, "noticetype": code, "limit": 100},
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
@@ -1085,8 +1084,7 @@ def fetch_sam_gov() -> list[Opportunity]:
                 params={"api_key": SAM_API_KEY, "keywords": kw,
                         "postedFrom": (today - timedelta(days=7)).strftime("%m/%d/%Y"),
                         "postedTo": (today + timedelta(days=60)).strftime("%m/%d/%Y"),
-                        "noticetype": "i", "limit": 25,
-                        
+                        "noticetype": "i", "limit": 25},
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
