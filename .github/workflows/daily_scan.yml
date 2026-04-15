@@ -2,12 +2,8 @@ name: Peregrine Daily Federal Scanner
 
 on:
   schedule:
-    # 9:00 AM ET = 13:00 UTC (EST, Nov–Mar) | 14:00 UTC (EDT, Mar–Nov)
-    # Using 13:00 to fire at 9am EST; it'll arrive ~8am during EDT — adjust if preferred
-    - cron: '0 13 * * 1-5'   # Weekdays Mon–Fri
-    # Uncomment for 7-day coverage:
-    # - cron: '0 13 * * *'
-  workflow_dispatch:          # Manual trigger from GitHub Actions UI
+    - cron: '0 13 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   daily-scan:
@@ -22,45 +18,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install requests
+        run: pip install requests
 
       - name: Run Peregrine Daily Scanner
-        id: scanner
         env:
           SAM_API_KEY:      ${{ secrets.SAM_API_KEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           EMAIL_TO:         mike.kelly@peregrine.io
           EMAIL_FROM:       mikefkelly26@gmail.com
         run: python daily_scan.py
-
-      - name: Upload HTML digest as artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: digest-${{ github.run_id }}-${{ github.run_number }}
-          path: "digest_*.html"
-          retention-days: 60
-
-      - name: Send failure alert
-        if: failure()
-        env:
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-        run: |
-          python - <<'EOF'
-          import requests, os
-          requests.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {os.environ['SENDGRID_API_KEY']}", "Content-Type": "application/json"},
-            json={
-              "personalizations": [{"to": [{"email": "mike.kelly@peregrine.io"}]}],
-              "from": {"email": "scanner@peregrine.io", "name": "Peregrine Federal Scanner"},
-              "subject": "⚠️ Peregrine Scanner Failed Today",
-              "content": [{"type": "text/plain", "value": "The daily scanner failed. Check GitHub Actions logs for details."}],
-            }
-          )
-          print("Failure alert sent")
-          EOF
