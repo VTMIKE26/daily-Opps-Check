@@ -34,7 +34,7 @@ jobs:
           SAM_API_KEY:      ${{ secrets.SAM_API_KEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           EMAIL_TO:         mike.kelly@peregrine.io
-          EMAIL_FROM:       mike.kelly@peregrine.io
+          EMAIL_FROM:       mikefkelly26@gmail.com
         run: python daily_scan.py
 
       - name: Upload HTML digest as artifact
