@@ -828,11 +828,15 @@ def main():
 
     for name, fn in sources:
         try:
+            print(f"\n[{name}] Starting fetch...")
             batch = fn()
             all_opps.extend(batch)
             source_counts[name] = len(batch)
+            print(f"[{name}] Done — {len(batch)} items")
         except Exception as e:
+            import traceback
             print(f"[{name}] FATAL: {e}")
+            traceback.print_exc()
             source_counts[name] = 0
 
     # Dedup and rank
@@ -867,4 +871,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import traceback
+    try:
+        main()
+    except Exception as e:
+        print(f"\n[FATAL ERROR] {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise
