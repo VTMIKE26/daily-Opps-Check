@@ -570,7 +570,7 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     # ── 8. Assign tier — widened thresholds ─────────────────────────────────
     if score >= 40:
         tier = "🟢 Strong Fit"
-    elif score >= 15:
+    elif score >= 10:
         tier = "🟡 Good Fit"
     elif score > 0:
         tier = "🔵 Possible Fit"
@@ -1142,10 +1142,12 @@ def build_section(title: str, opps: list[Opportunity]) -> str:
 
 def build_html_email(opps: list[Opportunity], run_date: str,
                      source_counts: dict) -> str:
+    # Exclude events from solicitation tiers so stats bar reflects actual RFI/RFP counts
+    non_events = [o for o in opps if o.source != "Events Intelligence"]
     tiers = {
-        "strong":   [o for o in opps if "Strong" in o.tier],
-        "good":     [o for o in opps if "Good" in o.tier],
-        "possible": [o for o in opps if "Possible" in o.tier],
+        "strong":   [o for o in non_events if "Strong" in o.tier],
+        "good":     [o for o in non_events if "Good" in o.tier],
+        "possible": [o for o in non_events if "Possible" in o.tier],
     }
     ind_days  = [o for o in opps if o.opp_type == "Industry Day"]
     fr_rfis   = [o for o in opps if o.source == "Federal Register"]
@@ -1159,7 +1161,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
         ("🟡 Good", len(tiers["good"])),
         ("RFIs/SS", sum(1 for o in opps if o.opp_type in ("RFI", "Sources Sought", "Federal Register RFI"))),
         ("Industry Days", len(ind_days)),
-        ("Events", len(events)),
+        ("Events", len(events)),  # all curated + live events
     ]
     stat_cells = "".join(f"""
         <td style="text-align:center;padding:4px 14px;border-right:1px solid #e8e8e8">
@@ -1203,7 +1205,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
   {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
   {build_section("🏛 Legislative Signals", signals[:5])}
-  {build_section("🎤 Events & Conferences to Attend", sorted([o for o in opps if o.source == "Events Intelligence"], key=lambda x: x.score, reverse=True))}
+  {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
 
   <!-- Footer -->
   <div style="text-align:center;font-size:11px;color:#bbb;margin-top:24px;padding:20px;border-top:1px solid #e0e0e0">
