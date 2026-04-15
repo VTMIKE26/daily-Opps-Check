@@ -112,7 +112,6 @@ CAPABILITY_CLUSTERS = [
     (
         "Data Integration & Unification", 25,
         [
-            # Core integration signals
             "data integration", "data unification", "data fusion",
             "unified data environment", "disparate systems", "disparate data",
             "siloed data", "data silos", "data harmonization",
@@ -123,18 +122,17 @@ CAPABILITY_CLUSTERS = [
             "master data management", "data normalization",
             "data fabric", "data mesh", "data lake",
             "integrate disparate", "fragmented data",
+            "data analytics", "analytics platform", "data management platform",
         ],
     ),
     (
         "Investigative & Operational Analytics", 25,
         [
-            # Investigative tools
             "investigative analytics", "investigative platform",
             "investigative workflow", "investigative tool",
             "link analysis", "relationship mapping", "entity analytics",
             "geospatial analysis", "geospatial intelligence",
             "pattern of life", "pattern analysis",
-            # Operational tools
             "operational intelligence", "operational dashboard",
             "situational awareness", "real-time dashboard",
             "common operating picture", "temporal analysis",
@@ -171,23 +169,26 @@ CAPABILITY_CLUSTERS = [
         ],
     ),
     (
-        "Secure Government SaaS Platform", 15,
+        "Secure Government SaaS — with Core Capability Requirement", 15,
         [
-            "fedramp high", "fedramp moderate", "fedramp authorized",
-            "fedramp", "cjis", "cjis compliant",
+            # Only scores when combined with a core capability cluster above.
+            # These phrases indicate the security/compliance wrapper around
+            # a data/analytics/search platform — not standalone IT security.
+            "fedramp high", "fedramp moderate", "fedramp authorized", "fedramp",
+            "cjis compliant", "cjis security",
             "nist sp 800-53", "nist 800-53",
             "aws govcloud", "govcloud",
-            "zero trust", "icam", "saml 2.0", "single sign-on",
+            "zero trust architecture", "icam integration",
+            "saml 2.0 sso", "single sign-on platform",
             "role-based access control", "attribute-based access",
-            "section 508", "audit logging", "data sovereignty",
-            "secure saas", "government cloud", "cloud-hosted platform",
+            "section 508 compliant", "audit logging platform",
             "ato", "authority to operate",
+            "secure cloud platform", "government saas",
         ],
     ),
     (
         "Public Safety & Law Enforcement", 20,
         [
-            # Law enforcement specific
             "law enforcement", "public safety platform",
             "police department", "sheriff department",
             "nibin", "etrace", "crime gun", "ballistic intelligence",
@@ -231,6 +232,24 @@ CAPABILITY_CLUSTERS = [
             "data platform upgrade",
         ],
     ),
+    (
+        "AI & Machine Learning for Government", 22,
+        [
+            # AI applied to Peregrine's specific domains
+            "artificial intelligence", "machine learning",
+            "ai/ml", "ai platform", "ai solution",
+            "generative ai", "large language model", "llm",
+            "natural language processing", "nlp",
+            "computer vision", "predictive model",
+            "decision support system", "automated analysis",
+            "ai-powered analytics", "ai-driven insights",
+            "intelligent automation", "algorithmic",
+            "ai for law enforcement", "ai public safety",
+            "ai investigative", "ai data platform",
+            "responsible ai", "explainable ai",
+            "ai governance", "ai model",
+        ],
+    ),
 ]
 
 # NAICS hints — infer capability when SAM.gov description is blank
@@ -263,6 +282,13 @@ HARD_EXCLUSIONS = [
     # Medical / pharma (non-IT)
     "pharmaceutical procurement", "drug manufacturing", "medical supply",
     "laboratory reagent", "clinical trial services",
+    # Construction & infrastructure projects
+    "construction project", "construction contract", "construction services",
+    "design and construction", "build and construction", "new construction",
+    "renovation project", "renovation contract", "building renovation",
+    "infrastructure construction", "facility construction",
+    "construction management", "general contractor",
+    "design-build", "design build", "architect and engineer",
     # Logistics
     "refuse collection", "moving services", "freight services",
     "shipping contract",
@@ -330,19 +356,33 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     reasons = []
     clusters_matched = 0
     title_only = opp.title.lower()
+    saas_hits = []  # Track SaaS hits separately — only count if core cluster also matches
 
     for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
         hits = [p for p in phrases if p.lower() in text]
         # When description is missing/short, also match against title alone
-        # SAM.gov search API frequently returns empty description fields
         if not hits and len(opp.description) < 80:
             hits = [p for p in phrases if p.lower() in title_only]
-        if hits:
-            score += cap_points
-            clusters_matched += 1
-            top_hits = sorted(hits, key=len, reverse=True)[:3]
-            reasons.append(f"✓ {cap_name}: matched '{top_hits[0]}'" +
-                          (f" + {len(hits)-1} more" if len(hits) > 1 else ""))
+        if not hits:
+            continue
+
+        # Secure SaaS cluster: defer scoring — only add if a core cap also matched
+        if cap_name.startswith("Secure Government SaaS"):
+            saas_hits = hits
+            continue
+
+        score += cap_points
+        clusters_matched += 1
+        top_hits = sorted(hits, key=len, reverse=True)[:3]
+        reasons.append(f"✓ {cap_name}: matched '{top_hits[0]}'" +
+                      (f" + {len(hits)-1} more" if len(hits) > 1 else ""))
+
+    # Now add SaaS score — but ONLY if at least one core capability cluster matched
+    if saas_hits and clusters_matched >= 1:
+        score += 15
+        clusters_matched += 1
+        top = sorted(saas_hits, key=len, reverse=True)[0]
+        reasons.append(f"✓ Secure Govt SaaS context: '{top}' (with core capability match)")
 
     # ── 4. Penalty signals ───────────────────────────────────────────────────
     for signal, penalty in PENALTY_SIGNALS:
@@ -510,6 +550,12 @@ def fetch_sam_gov() -> list[Opportunity]:
         "palantir replacement",
         "legacy platform modernization",
         "data platform replacement",
+        # AI cluster
+        "artificial intelligence law enforcement",
+        "machine learning public safety",
+        "ai analytics platform government",
+        "generative ai federal agency",
+        "nlp investigative platform",
     ]:
 
         try:
@@ -552,32 +598,30 @@ def fetch_sam_gov() -> list[Opportunity]:
 def fetch_federal_register() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    since = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    # 30-day window — Federal Register RFIs have longer comment periods
+    since = (today - timedelta(days=30)).strftime("%Y-%m-%d")
 
+    # Short targeted terms — Federal Register search matches title/abstract
     search_terms = [
-        # Law enforcement
-        "request for information federated search law enforcement",
-        "sources sought investigative analytics platform",
-        "request for information crime gun intelligence",
-        "sources sought data integration public safety",
-        "request for information CJIS compliant platform",
-        "sources sought NIBIN analytics",
-        # Palantir replacement / general data platform
-        "request for information enterprise data platform",
-        "sources sought data integration platform",
-        "request for information analytics modernization",
-        "sources sought data unification platform",
-        "request for information data fusion platform",
-        # Corrections / supervision
-        "sources sought community supervision data",
-        "request for information corrections data integration",
-        "sources sought probation parole platform",
-        "request for information offender management",
-        # Defense / intel
-        "request for information operational intelligence",
-        "sources sought mission analytics platform",
-        "industry day data integration federal",
-        "request for information FedRAMP High data platform",
+        "data integration",
+        "data analytics law enforcement",
+        "federated search",
+        "entity resolution",
+        "public safety software",
+        "law enforcement platform",
+        "community supervision",
+        "offender management",
+        "corrections data",
+        "palantir",
+        "artificial intelligence law enforcement",
+        "machine learning government",
+        "data platform modernization",
+        "crime analytics",
+        "investigative platform",
+        "situational awareness",
+        "information sharing law enforcement",
+        "cjis",
+        "fedramp data platform",
     ]
 
     seen_ids = set()
@@ -648,9 +692,12 @@ def fetch_federal_register() -> list[Opportunity]:
                 )
                 results.append(score_opportunity(opp))
 
-            time.sleep(0.3)  # Be polite to the API
+            if docs:
+                print(f"[FederalRegister] '{term}': {len(docs)} raw, kept {len([x for x in results if x.notice_id.startswith('FR-')])} after filter")
+            time.sleep(0.3)
         except Exception as e:
-            print(f"[FederalRegister] Error for '{term}': {e}")
+            status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
+            print(f"[FederalRegister] Error for '{term}': {type(e).__name__}: {e} (HTTP {status})")
 
     print(f"[Federal Register] {len(results)} notices fetched")
     return results
@@ -665,20 +712,20 @@ def fetch_federal_register() -> list[Opportunity]:
 def fetch_usaspending_intel() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    start_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
     end_date = today.strftime("%Y-%m-%d")
 
     keyword_batches = [
-        ["law enforcement analytics platform"],
-        ["federated search government"],
-        ["crime intelligence platform"],
-        ["public safety data integration"],
-        ["investigative software"],
-        ["community supervision platform"],
-        ["corrections data analytics"],
-        ["enterprise data integration platform"],
-        ["data fusion analytics"],
-        ["operational intelligence platform"],
+        ["law enforcement analytics"],
+        ["data integration platform"],
+        ["public safety software"],
+        ["crime analytics"],
+        ["community supervision"],
+        ["federated search"],
+        ["offender management"],
+        ["investigative platform"],
+        ["artificial intelligence law enforcement"],
+        ["palantir"],
         ["data platform modernization"],
     ]
 
@@ -745,9 +792,11 @@ def fetch_usaspending_intel() -> list[Opportunity]:
                 )
                 results.append(score_opportunity(opp))
 
+            print(f"[USASpending] {keywords}: {len(awards)} awards returned")
             time.sleep(0.5)
         except Exception as e:
-            print(f"[USASpending] Error: {e}")
+            status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
+            print(f"[USASpending] Error for {keywords}: {type(e).__name__}: {e} (HTTP {status})")
 
     print(f"[USASpending] {len(results)} award intel records fetched")
     return results
@@ -854,18 +903,18 @@ def fetch_industry_news() -> list[dict]:
     seen_titles = set()
 
     news_feeds = [
-        # Law enforcement & public safety tech
-        {"url": "https://www.govtech.com/public-safety/rss.xml",       "source": "GovTech — Public Safety"},
-        {"url": "https://www.govtech.com/law-enforcement/rss.xml",     "source": "GovTech — Law Enforcement"},
-        {"url": "https://www.police1.com/rss/all/",                    "source": "Police1"},
-        {"url": "https://www.corrections1.com/rss/all/",               "source": "Corrections1"},
-        # Federal IT & procurement
-        {"url": "https://fedscoop.com/feed/",                          "source": "FedScoop"},
-        {"url": "https://gcn.com/rss-feeds/all.aspx",                  "source": "GCN"},
-        {"url": "https://www.nextgov.com/rss/all/",                    "source": "Nextgov"},
-        {"url": "https://www.federaltimes.com/rss/",                   "source": "Federal Times"},
-        # AI in government
-        {"url": "https://www.govtech.com/artificial-intelligence/rss.xml", "source": "GovTech — AI"},
+        # Law enforcement & public safety tech — verified active feeds
+        {"url": "https://www.govtech.com/public-safety/rss.xml",        "source": "GovTech Public Safety"},
+        {"url": "https://www.govtech.com/artificial-intelligence/rss.xml","source": "GovTech AI"},
+        {"url": "https://www.govtech.com/security/rss.xml",             "source": "GovTech Security"},
+        # Federal IT
+        {"url": "https://fedscoop.com/feed/",                           "source": "FedScoop"},
+        {"url": "https://www.nextgov.com/rss/all/",                     "source": "Nextgov"},
+        {"url": "https://gcn.com/rss-feeds/all.aspx",                   "source": "GCN"},
+        {"url": "https://www.federaltimes.com/rss/",                    "source": "Federal Times"},
+        # Law enforcement specific
+        {"url": "https://www.police1.com/rss/all/",                     "source": "Police1"},
+        {"url": "https://www.corrections1.com/rss/all/",                "source": "Corrections1"},
     ]
 
     # Keywords that make a news item relevant to Peregrine
