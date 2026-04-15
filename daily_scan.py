@@ -232,50 +232,302 @@ class Opportunity:
     tier: str = ""
 
 # ---------------------------------------------------------------------------
-# SCORING ENGINE
+# DATE UTILITIES
 # ---------------------------------------------------------------------------
-def score_opportunity(opp: Opportunity) -> Opportunity:
-    text = f"{opp.title} {opp.description} {opp.agency}".lower()
-    score = 0
-    reasons = []
+def parse_date_flexible(date_str: str) -> datetime | None:
+    """Try multiple date formats and return a datetime or None."""
+    if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
+        return None
+    formats = [
+        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y",
+        "%b %d, %Y", "%d %b %Y",
+    ]
+    clean = date_str.strip()[:25]
+    for fmt in formats:
+        try:
+            return datetime.strptime(clean, fmt).replace(tzinfo=None)
+        except ValueError:
+            continue
+    return None
 
-    for kw in NEGATIVE_KEYWORDS:
-        if kw.lower() in text:
+def is_expired(opp: "Opportunity") -> bool:
+    """
+    Return True if the response deadline has clearly passed.
+    We use a 2-day grace buffer to avoid timezone edge cases.
+    If no deadline is parseable we keep the opportunity (err on side of inclusion).
+    """
+    today = datetime.utcnow()
+    grace = today - timedelta(days=2)
+
+    # Try response_date first, then posted_date as fallback
+    for date_str in [opp.response_date, opp.posted_date]:
+        dt = parse_date_flexible(date_str)
+        if dt:
+            return dt < grace
+    return False  # Can't determine — keep it
+
+
+# ---------------------------------------------------------------------------
+# CAPABILITY-BASED SCORING ENGINE
+#
+# Peregrine's core capabilities (what it actually does):
+#   1. Data Integration & Unification  — connect siloed systems into one environment
+#   2. Investigative / Operational Analytics — search, link analysis, geospatial, dashboards
+#   3. Federated Search — query across internal + external sources simultaneously
+#   4. Entity Resolution & Deduplication — patented record merging across systems
+#   5. Secure SaaS Platform — FedRAMP, CJIS, AWS GovCloud, NIST SP 800-53
+#   6. Public Safety / Law Enforcement — RMS, CAD, NIBIN, eTrace, crime gun intelligence
+#   7. Corrections & Supervision — probation, parole, offender management, CSOSA
+#   8. Palantir / Legacy Platform Replacement — enterprise intelligence modernization
+#
+# Scoring is CAPABILITY-MATCH driven, not keyword-spray:
+#   - Each capability has a cluster of specific, meaningful phrases
+#   - A hit in a cluster scores once for that cluster (no double-counting spray)
+#   - A NAICS match alone scores 0 — it must co-occur with capability signals
+#   - Hard exclusions for clearly irrelevant work
+# ---------------------------------------------------------------------------
+
+# Each capability cluster: (capability_name, points_if_matched, [phrases])
+# Phrases must be specific enough that a hit strongly implies Peregrine can do the work.
+CAPABILITY_CLUSTERS = [
+    (
+        "Data Integration & Unification",
+        25,
+        [
+            "data integration", "data unification", "data fusion", "unified data",
+            "integrate disparate", "siloed data", "data silos", "disparate systems",
+            "disparate data sources", "multi-source data", "data harmonization",
+            "data ingestion", "enterprise data platform", "data integration platform",
+            "master data management", "data normalization", "data lake", "data fabric",
+            "data mesh", "federated data", "data consolidation", "unified environment",
+        ],
+    ),
+    (
+        "Investigative & Operational Analytics",
+        25,
+        [
+            "investigative analytics", "investigative platform", "investigative workflow",
+            "link analysis", "relationship mapping", "entity analytics",
+            "operational intelligence", "operational dashboard", "situational awareness",
+            "real-time dashboard", "temporal analysis", "geospatial analysis",
+            "geospatial intelligence", "common operating picture", "pattern of life",
+            "advanced analytics", "crime analytics", "predictive analytics",
+            "intelligence platform", "all-source analytics", "mission analytics",
+        ],
+    ),
+    (
+        "Federated Search",
+        25,
+        [
+            "federated search", "enterprise search", "cross-system search",
+            "unified search", "search across", "search multiple systems",
+            "multi-system search", "search and retrieval", "information retrieval",
+            "search capability", "knowledge retrieval", "query across",
+        ],
+    ),
+    (
+        "Entity Resolution & Record Intelligence",
+        20,
+        [
+            "entity resolution", "record deduplication", "record linkage",
+            "record resolution", "duplicate records", "identity resolution",
+            "entity matching", "data deduplication", "master record",
+            "person record", "entity-centric", "record consolidation",
+            "ontology", "knowledge graph", "graph analytics",
+        ],
+    ),
+    (
+        "Secure Government SaaS Platform",
+        15,
+        [
+            "fedramp high", "fedramp moderate", "fedramp authorized",
+            "cjis", "nist sp 800-53", "aws govcloud", "govcloud",
+            "zero trust", "icam", "saml 2.0", "single sign-on",
+            "role-based access control", "attribute-based access",
+            "section 508", "wcag", "audit logging", "data sovereignty",
+            "secure saas", "government saas", "cloud-hosted",
+        ],
+    ),
+    (
+        "Public Safety & Law Enforcement",
+        20,
+        [
+            "law enforcement", "public safety", "police", "sheriff",
+            "nibin", "etrace", "crime gun", "ballistic", "cgic",
+            "rms", "records management system", "cad", "computer-aided dispatch",
+            "first responder", "criminal investigation", "violent crime",
+            "gang intelligence", "crime reduction", "officer wellness",
+            "body camera", "evidence management", "fusion center",
+        ],
+    ),
+    (
+        "Corrections & Community Supervision",
+        20,
+        [
+            "community supervision", "probation", "parole", "reentry",
+            "corrections", "offender management", "supervision officer",
+            "court services", "pretrial", "case supervision",
+            "csosa", "bureau of prisons", "department of corrections",
+            "recidivism", "offender data", "supervision platform",
+            "smart21", "case management supervision",
+        ],
+    ),
+    (
+        "Platform Modernization / Incumbent Replacement",
+        20,
+        [
+            "palantir", "gotham", "foundry", "platform replacement",
+            "platform modernization", "legacy platform", "incumbent replacement",
+            "platform consolidation", "technology refresh",
+            "legacy modernization", "platform migration",
+            "ibm i2", "data platform upgrade",
+        ],
+    ),
+]
+
+# Hard exclusions — if ANY of these appear, immediately discard
+HARD_EXCLUSIONS = [
+    # Physical / facilities
+    "construction", "hvac", "janitorial", "landscaping", "food service",
+    "furniture", "vehicle maintenance", "facilities management", "custodial",
+    "grounds maintenance", "pest control", "generator maintenance",
+    "electrical installation", "plumbing", "roofing", "flooring",
+    # Medical / pharma
+    "medical supply", "pharmaceutical", "drug manufacturing",
+    "clinical trial", "healthcare staffing", "nursing",
+    # Staffing / HR
+    "staffing agency", "temp staff", "temporary personnel",
+    "recruitment services", "executive search firm",
+    # Logistics / supply chain
+    "office supplies", "clothing", "uniform", "laundry",
+    "refuse collection", "shipping", "freight",
+    "aircraft maintenance", "ship repair", "vehicle fleet",
+    # Weapons / hardware
+    "ammunition supply", "firearms purchase", "weapon system",
+    "hardware procurement", "body armor purchase",
+    # Pure IT infrastructure (not platform)
+    "network cabling", "help desk staffing", "desktop support",
+    "printer maintenance", "telephone system installation",
+]
+
+# Penalty signals — reduce score if present (suggest mismatch but don't hard exclude)
+PENALTY_SIGNALS = [
+    ("custom software development only", -10),   # pure dev shop ask, not SaaS
+    ("staffing augmentation", -10),               # T&M body shop, not product
+    ("time and materials", -8),
+    ("independent verification", -8),             # IV&V work, not platform
+    ("penetration testing", -8),                  # pure security assessment
+    ("audit services", -8),                       # compliance audit, not platform
+    ("translation services", -15),
+    ("legal services", -15),
+    ("training services only", -10),              # pure training contract
+]
+
+
+def score_opportunity(opp: Opportunity) -> Opportunity:
+    """
+    Score based on genuine capability match.
+    Rules:
+      - Hard exclusion = score -1, stop immediately
+      - Past deadline = score -1, stop immediately
+      - Each capability cluster can score at most once
+      - NAICS alone contributes 0 — must have capability signal too
+      - Agency tier adds a modest bonus only when capability already matches
+      - Penalties reduce score for mismatch signals
+      - Minimum 2 capability clusters must match for Strong Fit
+    """
+    # ── 1. Hard exclusion check ───────────────────────────────────────────────
+    text = f"{opp.title} {opp.description} {opp.agency}".lower()
+    for excl in HARD_EXCLUSIONS:
+        if excl.lower() in text:
             opp.score = -1
             opp.tier = "⛔ Not a Fit"
-            opp.score_reasons = [f"Excluded: contains '{kw}'"]
+            opp.score_reasons = [f"Excluded: unrelated work (contains '{excl}')"]
             return opp
 
-    high_hits = [kw for kw in HIGH_VALUE_KEYWORDS if kw.lower() in text]
-    if high_hits:
-        score += min(len(high_hits) * 15, 60)
-        reasons.append(f"Core match: {', '.join(high_hits[:5])}")
+    # ── 2. Expired opportunity check ─────────────────────────────────────────
+    if is_expired(opp):
+        opp.score = -1
+        opp.tier = "⛔ Expired"
+        opp.score_reasons = [f"Response deadline has passed ({opp.response_date})"]
+        return opp
 
-    med_hits = [kw for kw in MEDIUM_VALUE_KEYWORDS if kw.lower() in text]
-    if med_hits:
-        score += min(len(med_hits) * 5, 25)
-        reasons.append(f"Adjacent match: {', '.join(med_hits[:5])}")
+    # ── 3. Capability cluster matching ───────────────────────────────────────
+    score = 0
+    reasons = []
+    clusters_matched = 0
 
-    if opp.naics and any(opp.naics.startswith(n) for n in NAICS_CODES):
-        score += 15
-        reasons.append(f"NAICS match: {opp.naics}")
+    for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
+        hits = [p for p in phrases if p.lower() in text]
+        if hits:
+            score += cap_points
+            clusters_matched += 1
+            # Show the 3 most specific hits (longest phrases = more specific)
+            top_hits = sorted(hits, key=len, reverse=True)[:3]
+            reasons.append(f"✓ {cap_name}: matched '{top_hits[0]}'" +
+                          (f" + {len(hits)-1} more" if len(hits) > 1 else ""))
 
-    agency_hits = [a for a in TARGET_AGENCIES if a.lower() in text]
-    if agency_hits:
-        score += min(len(agency_hits) * 5, 15)
-        reasons.append(f"Target agency: {agency_hits[0]}")
+    # ── 4. Penalty signals ───────────────────────────────────────────────────
+    for signal, penalty in PENALTY_SIGNALS:
+        if signal.lower() in text:
+            score += penalty
+            reasons.append(f"⚠ Penalty: '{signal}' suggests partial mismatch ({penalty} pts)")
 
-    type_bonuses = {
-        "RFI": 5, "Sources Sought": 5, "Pre-Solicitation": 3,
-        "Industry Day": 8, "Federal Register RFI": 6, "Award Intel": 2,
-    }
-    if opp.opp_type in type_bonuses:
-        score += type_bonuses[opp.opp_type]
-        if opp.opp_type == "Industry Day":
-            reasons.append("Industry Day — attend to shape requirements")
-        elif opp.opp_type in ("RFI", "Sources Sought", "Federal Register RFI"):
-            reasons.append("Early-stage: respond to shape the RFP")
+    # ── 5. Agency tier bonus — ONLY applied when capability already matched ──
+    if clusters_matched >= 1:
+        tier1_agencies = [
+            "bureau of alcohol", "atf", "department of justice", "doj",
+            "federal bureau of investigation", "fbi", "drug enforcement",
+            "dea", "u.s. marshals", "csosa", "court services and offender",
+        ]
+        tier2_agencies = [
+            "department of homeland security", "dhs", "customs and border",
+            "cbp", "immigration and customs", "ice", "secret service",
+            "transportation security", "tsa", "odni", "defense intelligence",
+            "dia", "national security agency", "nsa",
+        ]
+        tier3_agencies = [
+            "bureau of prisons", "bop", "office of justice", "ojp",
+            "national institute of justice", "nij", "pretrial services",
+            "department of defense", "dod", "socom", "darpa",
+            "fema", "gsa",
+        ]
+        if any(a in text for a in tier1_agencies):
+            score += 15
+            reasons.append("✓ Tier 1 target agency (active Peregrine relationship/RFI)")
+        elif any(a in text for a in tier2_agencies):
+            score += 10
+            reasons.append("✓ Tier 2 target agency (strong law enforcement/intel fit)")
+        elif any(a in text for a in tier3_agencies):
+            score += 5
+            reasons.append("✓ Tier 3 target agency (good federal fit)")
 
+    # ── 6. Notice type bonus ─────────────────────────────────────────────────
+    if clusters_matched >= 1:
+        type_bonuses = {
+            "RFI": 8, "Sources Sought": 8, "Pre-Solicitation": 5,
+            "Industry Day": 10, "Federal Register RFI": 7, "Award Intel": 3,
+        }
+        bonus = type_bonuses.get(opp.opp_type, 0)
+        if bonus:
+            score += bonus
+            label = {
+                "Industry Day": "Industry Day — attend to shape requirements",
+                "RFI": "RFI — respond to shape the eventual RFP",
+                "Sources Sought": "Sources Sought — demonstrate capability now",
+                "Pre-Solicitation": "Pre-Solicitation — early engagement window",
+                "Federal Register RFI": "Federal Register RFI — respond to shape the RFP",
+            }.get(opp.opp_type, "")
+            if label:
+                reasons.append(f"✓ {label}")
+
+    # ── 7. Require minimum substance for Strong Fit ──────────────────────────
+    # A single weak cluster match shouldn't hit Strong — need 2+ clusters
+    if clusters_matched < 2 and score >= 50:
+        score = 49  # Cap at Good Fit if only one cluster matched
+
+    # ── 8. Assign tier ───────────────────────────────────────────────────────
     if score >= 50:
         tier = "🟢 Strong Fit"
     elif score >= 25:
@@ -285,9 +537,11 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     else:
         tier = "⚪ Low Fit"
 
-    opp.score = score
+    opp.score = max(score, 0)
     opp.tier = tier
-    opp.score_reasons = reasons if reasons else ["No strong keyword matches found"]
+    opp.score_reasons = reasons if reasons else [
+        "No clear capability match — review manually"
+    ]
     return opp
 
 # ---------------------------------------------------------------------------
@@ -307,7 +561,8 @@ def fetch_sam_gov() -> list[Opportunity]:
             resp = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
                 params={"api_key": SAM_API_KEY, "postedFrom": from_date,
-                        "postedTo": to_date, "noticetype": code, "limit": 100},
+                        "postedTo": to_date, "noticetype": code, "limit": 100,
+                        "active": "Yes"},
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
@@ -364,7 +619,8 @@ def fetch_sam_gov() -> list[Opportunity]:
                 params={"api_key": SAM_API_KEY, "keywords": kw,
                         "postedFrom": (today - timedelta(days=7)).strftime("%m/%d/%Y"),
                         "postedTo": (today + timedelta(days=60)).strftime("%m/%d/%Y"),
-                        "noticetype": "i", "limit": 25},
+                        "noticetype": "i", "limit": 25,
+                        "active": "Yes"},
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
