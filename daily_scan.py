@@ -289,95 +289,394 @@ def is_expired(opp: "Opportunity") -> bool:
 # ---------------------------------------------------------------------------
 
 # Each capability cluster: (capability_name, points_if_matched, [phrases])
-# A hit anywhere in title+description+agency counts the cluster once.
-# Phrases are SHORT and common — matching how agencies actually write solicitations.
+# Phrases are SHORT and broad — matching how agencies actually write solicitations.
 CAPABILITY_CLUSTERS = [
     (
-        "Data Integration & Unification", 20,
+        "Data Integration & Platform", 20,
         [
-            "data integration", "data unification", "data fusion", "unified data",
-            "disparate systems", "siloed data", "data silos", "multi-source",
-            "data harmonization", "data ingestion", "enterprise data",
-            "data lake", "data fabric", "data mesh", "data consolidation",
-            "integrate data", "data platform", "unified platform",
-            "data environment", "integrated platform", "data management platform",
+            # Very broad data platform signals
+            "data integration", "data platform", "data management",
+            "data fusion", "data analytics", "data sharing",
+            "data unification", "data environment", "data solution",
+            "data system", "data architecture", "data infrastructure",
+            "enterprise data", "integrated data", "data modernization",
+            "information sharing", "information integration",
+            "information management", "information platform",
+            "database", "data warehouse", "data lake",
+            "analytics", "analytical", "dashboard", "reporting",
+            "business intelligence", "bi solution",
         ],
     ),
     (
-        "Investigative & Operational Analytics", 20,
+        "Search & Intelligence", 20,
         [
-            "investigative", "link analysis", "relationship mapping",
-            "operational intelligence", "operational dashboard",
-            "situational awareness", "real-time dashboard",
-            "geospatial", "pattern of life", "advanced analytics",
-            "crime analytics", "predictive analytics", "intelligence platform",
-            "data visualization", "analytical platform", "analytics platform",
-            "business intelligence", "reporting dashboard", "data analysis",
-        ],
-    ),
-    (
-        "Federated Search", 22,
-        [
-            "federated search", "enterprise search", "cross-system search",
-            "unified search", "search across", "information retrieval",
-            "search capability", "search platform", "full-text search",
-            "document search", "knowledge retrieval", "semantic search",
-        ],
-    ),
-    (
-        "Entity Resolution & Record Intelligence", 20,
-        [
-            "entity resolution", "record deduplication", "record linkage",
-            "duplicate records", "identity resolution", "entity matching",
-            "data deduplication", "ontology", "knowledge graph",
-            "graph analytics", "record matching", "entity management",
-        ],
-    ),
-    (
-        "Secure Government SaaS Platform", 15,
-        [
-            "fedramp", "cjis", "nist 800-53", "nist sp 800",
-            "govcloud", "zero trust", "icam", "saml", "single sign-on",
-            "role-based access", "attribute-based access",
-            "section 508", "audit logging", "secure cloud",
-            "government cloud", "cloud security", "ato",
-            "authority to operate", "accreditation", "accredited",
+            "search", "retrieval", "federated", "intelligence platform",
+            "investigative", "investigation", "link analysis",
+            "geospatial", "visualization", "situational awareness",
+            "real-time", "operational", "intelligence system",
+            "query", "knowledge management", "content management",
+            "records management", "document management",
         ],
     ),
     (
         "Public Safety & Law Enforcement", 20,
         [
-            "law enforcement", "public safety", "police department", "sheriff",
-            "nibin", "etrace", "crime gun", "ballistic",
-            "records management", "computer-aided dispatch", "cad system",
-            "first responder", "criminal investigation", "violent crime",
-            "gang", "crime reduction", "evidence management",
-            "fusion center", "criminal justice", "corrections",
-            "incident management", "dispatch", "patrol",
+            "law enforcement", "public safety", "police", "sheriff",
+            "criminal justice", "justice", "corrections", "courts",
+            "prosecution", "investigation", "crime", "incident",
+            "first responder", "emergency", "dispatch", "cad",
+            "nibin", "etrace", "ballistic", "gang", "violent",
+            "offender", "probation", "parole", "pretrial", "reentry",
+            "supervision", "court services", "case management",
         ],
     ),
     (
-        "Corrections & Community Supervision", 20,
+        "Software / SaaS / Cloud", 15,
         [
-            "community supervision", "probation", "parole", "reentry",
-            "offender management", "supervision officer",
-            "court services", "pretrial", "case supervision",
-            "csosa", "bureau of prisons", "recidivism",
-            "offender", "supervision program", "supervised release",
-            "case management", "reintegration",
+            "software", "saas", "cloud", "platform", "application",
+            "system", "solution", "tool", "capability", "service",
+            "web-based", "cloud-based", "hosted", "subscription",
+            "fedramp", "govcloud", "cjis", "nist", "zero trust",
+            "api", "integration", "interoperability", "modernization",
+            "digital transformation", "it modernization", "legacy",
         ],
     ),
     (
-        "Platform Modernization / Incumbent Replacement", 18,
+        "AI / Machine Learning / Automation", 18,
         [
-            "palantir", "platform replacement", "platform modernization",
-            "legacy platform", "incumbent replacement", "technology refresh",
-            "legacy modernization", "platform migration", "ibm i2",
-            "modernize", "modernization", "legacy system",
-            "system replacement", "system modernization",
-            "digital transformation", "it modernization",
+            "artificial intelligence", "machine learning", "ai", "ml",
+            "automation", "automated", "predictive", "nlp",
+            "natural language", "algorithm", "model", "generative",
+            "large language", "llm", "decision support",
         ],
     ),
+]
+
+# Hard exclusions — ONLY pure physical/commodity work with zero software component
+HARD_EXCLUSIONS = [
+    "hvac maintenance", "janitorial services", "landscaping services",
+    "food service contract", "custodial services", "grounds maintenance",
+    "pest control services", "generator maintenance contract",
+    "roofing services", "flooring installation", "plumbing services",
+    "purchase of laptops", "purchase of desktops", "purchase of servers",
+    "hardware purchase", "hardware procurement",
+    "network cabling installation", "structured cabling",
+    "purchase of radios", "purchase of body armor",
+    "ballistic vest purchase", "purchase of firearms",
+    "ammunition procurement", "fleet vehicle acquisition",
+    "pharmaceutical procurement", "drug manufacturing",
+    "laboratory reagent", "refuse collection",
+    "moving services contract", "freight services",
+    "aircraft engine overhaul", "ship repair services",
+    "translation services", "interpretation services",
+    "attorney services", "legal representation",
+    "financial audit services", "accounting services",
+    "building maintenance services", "elevator maintenance",
+]
+
+# Penalty signals — reduce score but don't exclude
+PENALTY_SIGNALS = [
+    ("staffing augmentation", -5),
+    ("time and materials labor", -5),
+    ("independent verification and validation", -5),
+    ("iv&v", -5),
+    ("translation only", -10),
+]
+
+# Hard exclusions — ONLY clearly physical/irrelevant work
+# Keep this list TIGHT — broad terms like "construction" wrongly exclude
+# IT solicitations that say things like "construction of a data platform"
+HARD_EXCLUSIONS = [
+    # Physical facilities (very specific phrases only)
+    "hvac maintenance", "janitorial services", "landscaping services",
+    "food service contract", "custodial services", "grounds maintenance",
+    "pest control services", "generator maintenance contract",
+    "electrical installation contract", "plumbing services",
+    "roofing services", "flooring installation",
+    # Hardware procurement (specific purchase phrases only)
+    "purchase of laptops", "purchase of desktops", "purchase of servers",
+    "purchase of tablets", "hardware purchase", "hardware procurement",
+    "network cabling installation", "structured cabling",
+    "purchase of radios", "radio system purchase",
+    "purchase of body armor", "ballistic vest purchase",
+    "purchase of firearms", "ammunition procurement",
+    "vehicle purchase", "fleet vehicle acquisition",
+    # Medical / pharma
+    "pharmaceutical procurement", "drug manufacturing",
+    "clinical trial services", "medical staffing",
+    "laboratory reagent", "lab supply procurement",
+    # Physical logistics
+    "refuse collection", "moving services", "freight services",
+    "aircraft engine overhaul", "ship repair services",
+    # Professional services clearly unrelated
+    "legal counsel services", "attorney services",
+    "translation services", "interpretation services",
+    "financial audit services", "accounting services",
+    # Facilities management (specific)
+    "building maintenance services", "elevator maintenance",
+    "window cleaning services",
+]
+
+# Penalty signals — reduce score but don't exclude
+PENALTY_SIGNALS = [
+    ("body shop", -10),
+    ("staffing augmentation", -8),
+    ("time and materials labor", -6),
+    ("independent verification and validation", -8),
+    ("iv&v", -8),
+    ("penetration testing only", -6),
+    ("translation only", -12),
+]
+
+def score_opportunity(opp: Opportunity) -> Opportunity:
+    """
+    Score based on capability match. Very permissive — designed to surface
+    anything that could plausibly involve Peregrine's platform.
+    """
+    text = f"{opp.title} {opp.description} {opp.agency}".lower()
+    score = 0
+    reasons = []
+
+    # ── 1. Hard exclusion — only pure physical/commodity work ────────────────
+    for excl in HARD_EXCLUSIONS:
+        if excl.lower() in text:
+            opp.score = -1
+            opp.tier = "⛔ Not a Fit"
+            opp.score_reasons = [f"Excluded: '{excl}'"]
+            return opp
+
+    # ── 2. Expired check ─────────────────────────────────────────────────────
+    if is_expired(opp):
+        opp.score = -1
+        opp.tier = "⛔ Expired"
+        opp.score_reasons = [f"Response deadline passed ({opp.response_date})"]
+        return opp
+
+    # ── 3. Capability cluster matching ───────────────────────────────────────
+    clusters_matched = 0
+    for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
+        hits = [p for p in phrases if p.lower() in text]
+        if hits:
+            score += cap_points
+            clusters_matched += 1
+            top = sorted(hits, key=len, reverse=True)[:2]
+            reasons.append(f"✓ {cap_name}: '{top[0]}'" +
+                          (f" +{len(hits)-1}" if len(hits) > 1 else ""))
+
+    # ── 4. Penalty signals ───────────────────────────────────────────────────
+    for signal, penalty in PENALTY_SIGNALS:
+        if signal.lower() in text:
+            score += penalty
+            reasons.append(f"⚠ Penalty: '{signal}' ({penalty}pts)")
+
+    # ── 5. Agency bonus ──────────────────────────────────────────────────────
+    tier1 = ["bureau of alcohol", "atf", "department of justice", "doj",
+             "federal bureau of investigation", "fbi", "drug enforcement",
+             "dea", "u.s. marshals", "csosa", "court services"]
+    tier2 = ["department of homeland security", "dhs", "customs and border",
+             "cbp", "immigration and customs", "ice", "secret service",
+             "transportation security", "tsa", "odni", "defense intelligence",
+             "national security agency", "nsa", "cia"]
+    tier3 = ["bureau of prisons", "bop", "office of justice", "ojp",
+             "national institute of justice", "pretrial services",
+             "department of defense", "dod", "socom", "darpa", "fema",
+             "gsa", "department of veterans", "social security",
+             "department of state", "treasury"]
+
+    if any(a in text for a in tier1):
+        score += 15
+        reasons.append("✓ Tier 1 target agency")
+    elif any(a in text for a in tier2):
+        score += 10
+        reasons.append("✓ Tier 2 target agency")
+    elif any(a in text for a in tier3):
+        score += 5
+        reasons.append("✓ Tier 3 target agency")
+
+    # ── 6. Notice type bonus ─────────────────────────────────────────────────
+    bonuses = {
+        "RFI": 8, "Sources Sought": 8, "Pre-Solicitation": 5,
+        "Industry Day": 10, "Federal Register RFI": 7, "Award Intel": 3,
+    }
+    bonus = bonuses.get(opp.opp_type, 0)
+    if bonus:
+        score += bonus
+        labels = {
+            "Industry Day": "Industry Day — attend to shape requirements",
+            "RFI": "RFI — respond to shape the eventual RFP",
+            "Sources Sought": "Sources Sought — demonstrate capability now",
+            "Pre-Solicitation": "Pre-Solicitation — early engagement window",
+            "Federal Register RFI": "Federal Register RFI — respond to shape RFP",
+        }
+        if opp.opp_type in labels:
+            reasons.append(f"✓ {labels[opp.opp_type]}")
+
+    # ── 7. Tier assignment ───────────────────────────────────────────────────
+    score = max(score, 0)
+    if score >= 35:
+        tier = "🟢 Strong Fit"
+    elif score >= 10:
+        tier = "🟡 Good Fit"
+    elif score > 0:
+        tier = "🔵 Possible Fit"
+    else:
+        tier = "⚪ Low Fit"
+
+    opp.score = score
+    opp.tier = tier
+    opp.score_reasons = reasons if reasons else ["No capability match — review manually"]
+    return opp
+
+# ---------------------------------------------------------------------------
+# DATE UTILITIES
+# ---------------------------------------------------------------------------
+def parse_date_flexible(date_str: str) -> datetime | None:
+    """Try multiple date formats and return a datetime or None."""
+    if not date_str or date_str in ("TBD", "N/A", "See posting", "Watch for recompete"):
+        return None
+    formats = [
+        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y",
+        "%b %d, %Y", "%d %b %Y",
+    ]
+    clean = date_str.strip()[:25]
+    for fmt in formats:
+        try:
+            return datetime.strptime(clean, fmt).replace(tzinfo=None)
+        except ValueError:
+            continue
+    return None
+
+def is_expired(opp: "Opportunity") -> bool:
+    """
+    Return True if the response deadline has clearly passed.
+    We use a 2-day grace buffer to avoid timezone edge cases.
+    If no deadline is parseable we keep the opportunity (err on side of inclusion).
+    """
+    today = datetime.utcnow()
+    grace = today - timedelta(days=2)
+
+    # Try response_date first, then posted_date as fallback
+    for date_str in [opp.response_date, opp.posted_date]:
+        dt = parse_date_flexible(date_str)
+        if dt:
+            return dt < grace
+    return False  # Can't determine — keep it
+
+
+# ---------------------------------------------------------------------------
+# CAPABILITY-BASED SCORING ENGINE
+#
+# Peregrine's core capabilities (what it actually does):
+#   1. Data Integration & Unification  — connect siloed systems into one environment
+#   2. Investigative / Operational Analytics — search, link analysis, geospatial, dashboards
+#   3. Federated Search — query across internal + external sources simultaneously
+#   4. Entity Resolution & Deduplication — patented record merging across systems
+#   5. Secure SaaS Platform — FedRAMP, CJIS, AWS GovCloud, NIST SP 800-53
+#   6. Public Safety / Law Enforcement — RMS, CAD, NIBIN, eTrace, crime gun intelligence
+#   7. Corrections & Supervision — probation, parole, offender management, CSOSA
+#   8. Palantir / Legacy Platform Replacement — enterprise intelligence modernization
+#
+# Scoring is CAPABILITY-MATCH driven, not keyword-spray:
+#   - Each capability has a cluster of specific, meaningful phrases
+#   - A hit in a cluster scores once for that cluster (no double-counting spray)
+#   - A NAICS match alone scores 0 — it must co-occur with capability signals
+#   - Hard exclusions for clearly irrelevant work
+# ---------------------------------------------------------------------------
+
+# Each capability cluster: (capability_name, points_if_matched, [phrases])
+# Phrases are SHORT and broad — matching how agencies actually write solicitations.
+CAPABILITY_CLUSTERS = [
+    (
+        "Data Integration & Platform", 20,
+        [
+            # Very broad data platform signals
+            "data integration", "data platform", "data management",
+            "data fusion", "data analytics", "data sharing",
+            "data unification", "data environment", "data solution",
+            "data system", "data architecture", "data infrastructure",
+            "enterprise data", "integrated data", "data modernization",
+            "information sharing", "information integration",
+            "information management", "information platform",
+            "database", "data warehouse", "data lake",
+            "analytics", "analytical", "dashboard", "reporting",
+            "business intelligence", "bi solution",
+        ],
+    ),
+    (
+        "Search & Intelligence", 20,
+        [
+            "search", "retrieval", "federated", "intelligence platform",
+            "investigative", "investigation", "link analysis",
+            "geospatial", "visualization", "situational awareness",
+            "real-time", "operational", "intelligence system",
+            "query", "knowledge management", "content management",
+            "records management", "document management",
+        ],
+    ),
+    (
+        "Public Safety & Law Enforcement", 20,
+        [
+            "law enforcement", "public safety", "police", "sheriff",
+            "criminal justice", "justice", "corrections", "courts",
+            "prosecution", "investigation", "crime", "incident",
+            "first responder", "emergency", "dispatch", "cad",
+            "nibin", "etrace", "ballistic", "gang", "violent",
+            "offender", "probation", "parole", "pretrial", "reentry",
+            "supervision", "court services", "case management",
+        ],
+    ),
+    (
+        "Software / SaaS / Cloud", 15,
+        [
+            "software", "saas", "cloud", "platform", "application",
+            "system", "solution", "tool", "capability", "service",
+            "web-based", "cloud-based", "hosted", "subscription",
+            "fedramp", "govcloud", "cjis", "nist", "zero trust",
+            "api", "integration", "interoperability", "modernization",
+            "digital transformation", "it modernization", "legacy",
+        ],
+    ),
+    (
+        "AI / Machine Learning / Automation", 18,
+        [
+            "artificial intelligence", "machine learning", "ai", "ml",
+            "automation", "automated", "predictive", "nlp",
+            "natural language", "algorithm", "model", "generative",
+            "large language", "llm", "decision support",
+        ],
+    ),
+]
+
+# Hard exclusions — ONLY pure physical/commodity work with zero software component
+HARD_EXCLUSIONS = [
+    "hvac maintenance", "janitorial services", "landscaping services",
+    "food service contract", "custodial services", "grounds maintenance",
+    "pest control services", "generator maintenance contract",
+    "roofing services", "flooring installation", "plumbing services",
+    "purchase of laptops", "purchase of desktops", "purchase of servers",
+    "hardware purchase", "hardware procurement",
+    "network cabling installation", "structured cabling",
+    "purchase of radios", "purchase of body armor",
+    "ballistic vest purchase", "purchase of firearms",
+    "ammunition procurement", "fleet vehicle acquisition",
+    "pharmaceutical procurement", "drug manufacturing",
+    "laboratory reagent", "refuse collection",
+    "moving services contract", "freight services",
+    "aircraft engine overhaul", "ship repair services",
+    "translation services", "interpretation services",
+    "attorney services", "legal representation",
+    "financial audit services", "accounting services",
+    "building maintenance services", "elevator maintenance",
+]
+
+# Penalty signals — reduce score but don't exclude
+PENALTY_SIGNALS = [
+    ("staffing augmentation", -5),
+    ("time and materials labor", -5),
+    ("independent verification and validation", -5),
+    ("iv&v", -5),
+    ("translation only", -10),
 ]
 
 # Hard exclusions — ONLY clearly physical/irrelevant work
@@ -1392,6 +1691,32 @@ def source_badge(source: str) -> str:
     return (f'<span style="background:{color};color:#fff;font-size:10px;font-weight:700;'
             f'padding:2px 7px;border-radius:10px;margin-left:6px;">{source}</span>')
 
+def deadline_badge(response_date: str) -> str:
+    """Return a color-coded deadline badge based on urgency."""
+    from datetime import datetime, timedelta
+    if not response_date or response_date in ("TBD", "N/A", "See posting",
+            "Watch for recompete", "See event page for registration deadline",
+            "Typically varies — check site"):
+        return f'<span style="background:#888;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;">📅 Due: {response_date}</span>'
+
+    dt = parse_date_flexible(response_date)
+    today = datetime.utcnow()
+    if not dt:
+        return f'<span style="background:#888;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;">📅 Due: {response_date}</span>'
+
+    days_left = (dt - today).days
+    if days_left <= 7:
+        color, emoji, label = "#c0392b", "🔴", f"Due in {max(days_left,0)}d — ACT NOW"
+    elif days_left <= 14:
+        color, emoji, label = "#e67e22", "🟠", f"Due in {days_left}d — Urgent"
+    elif days_left <= 30:
+        color, emoji, label = "#f39c12", "🟡", f"Due in {days_left}d"
+    else:
+        color, emoji, label = "#27ae60", "🟢", f"Due {dt.strftime('%b %d, %Y')}"
+
+    return f'<span style="background:{color};color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;">{emoji} {label}</span>'
+
+
 def opp_card(o: Opportunity) -> str:
     tier_color = {
         "🟢 Strong Fit": "#1a7a4a",
@@ -1401,6 +1726,7 @@ def opp_card(o: Opportunity) -> str:
 
     reasons_html = "".join(f"<li style='margin-bottom:2px'>{r}</li>" for r in o.score_reasons)
     desc_preview = o.description[:350].strip() + ("..." if len(o.description) > 350 else "")
+    badge = deadline_badge(o.response_date)
 
     return f"""
     <div style="border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin-bottom:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
@@ -1410,11 +1736,11 @@ def opp_card(o: Opportunity) -> str:
         {source_badge(o.source)}
         <span style="font-size:11px;color:#888;margin-left:6px;">{o.opp_type}</span>
       </div>
-      <div style="font-weight:700;font-size:15px;color:#111;margin-bottom:5px;line-height:1.3">{o.title}</div>
+      <div style="font-weight:700;font-size:15px;color:#111;margin-bottom:6px;line-height:1.3">{o.title}</div>
+      <div style="margin-bottom:8px;">{badge}</div>
       <div style="font-size:12px;color:#666;margin-bottom:8px;">
         🏛 {o.agency[:80]}
-        &nbsp;·&nbsp; 📅 {o.posted_date}
-        &nbsp;·&nbsp; ⏰ {o.response_date}
+        &nbsp;·&nbsp; 📬 Posted: {o.posted_date}
       </div>
       <div style="font-size:13px;color:#333;line-height:1.5;margin-bottom:8px;">{desc_preview}</div>
       <div style="font-size:12px;color:#555;margin-bottom:10px;">
@@ -1422,7 +1748,7 @@ def opp_card(o: Opportunity) -> str:
         <ul style="margin:3px 0 0 14px;padding:0;">{reasons_html}</ul>
       </div>
       <a href="{o.url}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;
-         padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;">View Source →</a>
+         padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;">View on Source →</a>
     </div>"""
 
 def build_section(title: str, opps: list[Opportunity]) -> str:
