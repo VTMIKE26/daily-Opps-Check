@@ -426,78 +426,13 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
             score += penalty
             reasons.append(f"⚠ Penalty: '{signal}' suggests partial mismatch ({penalty} pts)")
 
-    # ── 5. Agency tier bonus — ONLY applied when capability already matched ──
-    if clusters_matched >= 1:
-        tier1_agencies = [
-            "bureau of alcohol", "atf", "department of justice", "doj",
-            "federal bureau of investigation", "fbi", "drug enforcement",
-            "dea", "u.s. marshals", "csosa", "court services and offender",
-        ]
-        tier2_agencies = [
-            "department of homeland security", "dhs", "customs and border",
-            "cbp", "immigration and customs", "ice", "secret service",
-            "transportation security", "tsa", "odni", "defense intelligence",
-            "dia", "national security agency", "nsa",
-        ]
-        tier3_agencies = [
-            "bureau of prisons", "bop", "office of justice", "ojp",
-            "national institute of justice", "nij", "pretrial services",
-            "department of defense", "dod", "socom", "darpa",
-            "fema", "gsa",
-        ]
-        if any(a in text for a in tier1_agencies):
-            score += 15
-            reasons.append("✓ Tier 1 target agency (active Peregrine relationship/RFI)")
-        elif any(a in text for a in tier2_agencies):
-            score += 10
-            reasons.append("✓ Tier 2 target agency (strong law enforcement/intel fit)")
-        elif any(a in text for a in tier3_agencies):
-            score += 5
-            reasons.append("✓ Tier 3 target agency (good federal fit)")
-
-    # ── 6. Notice type bonus ─────────────────────────────────────────────────
-    if clusters_matched >= 1:
-        type_bonuses = {
-            "RFI": 8, "Sources Sought": 8, "Pre-Solicitation": 5,
-            "Industry Day": 10, "Federal Register RFI": 7, "Award Intel": 3,
-        }
-        bonus = type_bonuses.get(opp.opp_type, 0)
-        if bonus:
-            score += bonus
-            label = {
-                "Industry Day": "Industry Day — attend to shape requirements",
-                "RFI": "RFI — respond to shape the eventual RFP",
-                "Sources Sought": "Sources Sought — demonstrate capability now",
-                "Pre-Solicitation": "Pre-Solicitation — early engagement window",
-                "Federal Register RFI": "Federal Register RFI — respond to shape the RFP",
-            }.get(opp.opp_type, "")
-            if label:
-                reasons.append(f"✓ {label}")
-
-    # ── 7. Minimum cluster rule — with exception for highly specific asks ────
-    # Single-cluster matches are usually still worth seeing if the cluster
-    # is highly specific to Peregrine's unique capabilities.
-    specific_clusters = {
-        "Federated Search",
-        "Entity Resolution & Record Intelligence",
-        "Corrections & Community Supervision",
-        "Platform Modernization / Incumbent Replacement",
-    }
-    matched_cluster_names = set()
-    for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
-        if any(p.lower() in text for p in phrases):
-            matched_cluster_names.add(cap_name)
-    is_specific_single = (
-        clusters_matched == 1 and
-        bool(matched_cluster_names & specific_clusters)
-    )
-    if clusters_matched < 2 and not is_specific_single and score >= 40:
-        score = 39  # Cap at Good Fit if single non-specific cluster
-
-    # ── 8. Assign tier — widened thresholds ─────────────────────────────────
+    # ── 5. Assign tier — purely capability-based, no bonuses ────────────────
+    # Strong Fit = 2+ clusters matched (40+ pts)
+    # Good Fit   = 1 cluster matched  (15-39 pts)
+    # Possible   = partial signal      (1-14 pts)
     if score >= 40:
         tier = "🟢 Strong Fit"
-    elif score >= 10:
+    elif score >= 15:
         tier = "🟡 Good Fit"
     elif score > 0:
         tier = "🔵 Possible Fit"
