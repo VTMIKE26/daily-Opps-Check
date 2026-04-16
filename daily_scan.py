@@ -490,24 +490,24 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 # ---------------------------------------------------------------------------
 def fetch_sam_gov() -> list[Opportunity]:
     """
-    SAM.gov v2 API — capability-keyword-first, NAICS as secondary net.
+    SAM.gov Public Search API v2.
 
-    NAICS codes do NOT determine fit. Peregrine wins work across many agency
-    NAICS codes because agencies classify by mission (law enforcement) not by
-    what they are buying (software). A DOJ solicitation for a data analytics
-    platform may carry NAICS 922120 (Police Protection) not 541511 (Software).
+    KEY FACTS (from API docs):
+      - Correct param is "title" (title-field search), NOT "keyword"
+      - "keyword" does not exist in this API — that is why we returned nothing
+      - ptype codes: r=Sources Sought, p=Presolicitation, k=Combined Synopsis/Solicitation,
+                     o=Solicitation, s=Special Notice, a=Award Notice
+      - Rate limit: 1,000 calls/day with public API key
+      - Endpoint: https://api.sam.gov/opportunities/v2/search
 
-    Strategy (keyword-first):
-      1. Keyword sweep  — 90 days, ALL notice types, NO NAICS filter
-                          One API call per core capability term.
-                          This is how ATR IT MODERNIZATION gets caught.
-      2. NAICS safety net — 30 days, common IT delivery NAICS codes only
-                            Catches well-coded solicitations not in keyword results.
-
-    Scoring engine decides relevance — we cast the widest possible net.
+    Strategy:
+      Search by TITLE using short terms that appear in solicitation titles.
+      Each call returns up to 100 results sorted by posted date.
+      We run one call per capability term — no NAICS filter so we catch
+      opportunities regardless of how the agency classified them.
     """
     if not SAM_API_KEY:
-        print("[SAM.gov] No API key set — skipping")
+        print("[SAM.gov] No API key — skipping")
         return []
 
     results  = []
@@ -537,75 +537,102 @@ def fetch_sam_gov() -> list[Opportunity]:
             naics         = item.get("naicsCode", ""),
         )))
 
-    def _get(params, label, from_date):
+    def _search(title_term, from_date, label):
+        """Single title search — correct SAM.gov v2 param is 'title'."""
         try:
             r = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY,
-                        "postedFrom": from_date, "postedTo": to_date,
-                        "limit": 100, **params},
-                headers=HEADERS, timeout=30,
+                params={
+                    "api_key":    SAM_API_KEY,
+                    "title":      title_term,   # ← correct param, not "keyword"
+                    "postedFrom": from_date,
+                    "postedTo":   to_date,
+                    "active":     "Yes",        # active opportunities only
+                    "limit":      100,
+                },
+                headers=HEADERS,
+                timeout=30,
             )
             r.raise_for_status()
             data  = r.json()
             items = data.get("opportunitiesData", [])
             total = data.get("totalRecords", 0)
-            new   = sum(1 for i in items if (i.get("noticeId") or i.get("id","")) not in seen_ids)
+            new   = sum(1 for i in items
+                        if (i.get("noticeId") or i.get("id","")) not in seen_ids)
             if total:
-                print(f"[SAM.gov] {label}: {total} total | {len(items)} fetched | {new} new")
+                print(f"[SAM.gov] '{title_term}': {total} total | "
+                      f"{len(items)} fetched | {new} new")
             for item in items:
                 _add(item)
-            time.sleep(0.25)
+            time.sleep(0.3)
         except Exception as e:
-            print(f"[SAM.gov] {label} error: {e}")
+            print(f"[SAM.gov] '{title_term}' error: {e}")
 
-    # ── PASS 1 — Capability keyword sweep (90 days, ALL notice types) ─────────
-    # These keywords are pulled directly from Peregrine's 9 capability clusters.
-    # No NAICS filter — a DOJ "IT Modernization: Data Analytics Solution" notice
-    # may carry any NAICS code depending on how the CO classified it.
-    # Short terms (1-3 words) match more solicitation titles than long phrases.
-    KEYWORDS = [
+    # ── Title search — Peregrine capability terms (90-day window) ────────────
+    # These are short phrases that appear verbatim in solicitation TITLES.
+    # We use "title" param which is what the SAM.gov v2 API actually supports.
+    # Grouped by Peregrine capability cluster for maintainability.
+    TITLE_TERMS = [
         # Data Integration & Unification
-        "data analytics",        "data integration",      "data platform",
-        "data management",       "analytics platform",    "analytics solution",
-        "data unification",      "information sharing",   "enterprise data",
+        "data analytics",       "data integration",     "data platform",
+        "data management",      "analytics platform",   "analytics solution",
+        "data unification",     "enterprise data",      "information sharing",
         # Investigative & Operational Analytics
-        "investigative analytics","crime analytics",       "predictive analytics",
-        "situational awareness", "intelligence platform", "link analysis",
-        "geospatial analytics",  "operational intelligence",
+        "crime analytics",      "predictive analytics", "situational awareness",
+        "intelligence platform","investigative",        "link analysis",
+        "geospatial analytics", "operational intelligence",
         # Federated & Enterprise Search
-        "federated search",      "enterprise search",
+        "federated search",     "enterprise search",
         # Entity Resolution
-        "entity resolution",     "record deduplication",  "identity resolution",
+        "entity resolution",    "record deduplication",
         # Public Safety & Law Enforcement
-        "law enforcement",       "public safety platform","records management",
-        "computer aided dispatch","crime gun",            "fusion center",
-        "criminal justice",      "investigative platform",
+        "law enforcement",      "public safety",        "records management",
+        "computer aided dispatch","crime gun",          "fusion center",
+        "criminal justice",
         # Corrections & Supervision
-        "community supervision", "offender management",   "probation",
-        "corrections platform",  "supervised release",
-        # Platform Modernization
-        "IT modernization",      "platform modernization","legacy modernization",
+        "community supervision","offender management",  "probation",
+        "corrections",          "supervised release",
+        # Platform Modernization — catches "ATR IT MODERNIZATION" etc.
+        "IT modernization",     "platform modernization","legacy modernization",
         "digital transformation","palantir",
         # AI & ML
-        "artificial intelligence","machine learning",     "AI platform",
+        "artificial intelligence","machine learning",   "AI platform",
         # Secure Gov SaaS
-        "fedramp",               "cjis",
+        "fedramp",              "cjis",
     ]
-    for kw in KEYWORDS:
-        _get({"keyword": kw}, f"kw='{kw}'", from_90)
+    for term in TITLE_TERMS:
+        _search(term, from_90, term)
 
-    kw_count = len(results)
-    print(f"[SAM.gov] Pass 1 (keywords, 90d): {kw_count} unique opportunities")
+    title_count = len(results)
+    print(f"[SAM.gov] Title search (90d): {title_count} unique opportunities")
 
-    # ── PASS 2 — NAICS safety net (30 days) ──────────────────────────────────
-    # Secondary catch for well-coded IT solicitations missed by keywords.
-    # Intentionally narrow window — broad NAICS sweeps return too much noise.
-    for naics in ["513210","541511","541512","541519","518210"]:
-        _get({"naicsCode": naics}, f"NAICS {naics}", from_30)
+    # ── ptype sweep — recent RFIs/Sources Sought as safety net (30d) ─────────
+    # Catches well-described opportunities whose titles don't match our terms.
+    for ptype, label in [("r","Sources Sought"), ("p","Presolicitation"),
+                         ("k","Combined Synopsis")]:
+        try:
+            r = requests.get(
+                "https://api.sam.gov/opportunities/v2/search",
+                params={"api_key": SAM_API_KEY, "ptype": ptype,
+                        "postedFrom": from_30, "postedTo": to_date,
+                        "active": "Yes", "limit": 100},
+                headers=HEADERS, timeout=30,
+            )
+            r.raise_for_status()
+            items = r.json().get("opportunitiesData", [])
+            new   = sum(1 for i in items
+                        if (i.get("noticeId") or i.get("id","")) not in seen_ids)
+            print(f"[SAM.gov] ptype={ptype} ({label}): "
+                  f"{len(items)} fetched | {new} new")
+            for item in items:
+                _add(item)
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[SAM.gov] ptype={ptype} error: {e}")
 
-    print(f"[SAM.gov] Pass 2 (NAICS, 30d): {len(results)-kw_count} additional unique")
-    print(f"[SAM.gov] Total: {len(results)} opportunities fetched")
+    sweep_count = len(results) - title_count
+    print(f"[SAM.gov] ptype sweep (30d): {sweep_count} additional unique")
+    print(f"[SAM.gov] Total fetched: {len(results)}")
     return results
 
 
