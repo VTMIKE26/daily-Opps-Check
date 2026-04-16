@@ -491,7 +491,7 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 def fetch_sam_gov() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    from_date = (today - timedelta(days=30)).strftime("%m/%d/%Y")
+    from_date = (today - timedelta(days=60)).strftime("%m/%d/%Y")
     to_date = today.strftime("%m/%d/%Y")
 
     notice_types = {"r": "RFI", "s": "Sources Sought", "i": "Industry Day", "p": "Pre-Solicitation", "o": "Solicitation", "k": "Award", "g": "Sale of Surplus Property", "a": "Special Notice"}
@@ -545,6 +545,14 @@ def fetch_sam_gov() -> list[Opportunity]:
         # AI
         "artificial intelligence law enforcement",
         "machine learning analytics", "predictive analytics",
+        # Catch IT modernization + data analytics combo titles
+        "IT modernization data analytics",
+        "data analytics modernization",
+        "modernization analytics solution",
+        "analytics solution modernization",
+        # Catch any data analytics RFI regardless of agency acronym
+        "data analytics solution",
+        "analytics solution",
     ]:
 
 
@@ -1076,6 +1084,43 @@ def opp_card(o: Opportunity) -> str:
       {f'<a href="{o.url}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;">View on Source →</a>' if o.url else '<span style="font-size:12px;color:#888;font-style:italic;">No link available</span>'}
     </div>"""
 
+def _possible_fits(non_events: list, tiers: dict) -> list:
+    """
+    Return items for the Possible Fit section.
+    Priority order:
+      1. Items scored as Possible Fit by the engine (score 1-14)
+      2. If none: top Low Fit items by score (highest score first)
+      3. If still none: any non-excluded item with at least one keyword in title
+    Always returns something if data exists — never an empty section.
+    """
+    # Primary: engine-scored Possible Fit
+    possible = [o for o in tiers.get("possible", []) if o.source != "Events Intelligence"]
+    if possible:
+        return possible
+
+    # Fallback 1: best Low Fit items (have score > 0 but below threshold)
+    low = sorted(
+        [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0],
+        key=lambda x: x.score, reverse=True
+    )
+    if low:
+        return low[:10]
+
+    # Fallback 2: any item that hit at least one cluster keyword in its title
+    # (score may be 0 if penalties cancelled it, but title signal is real)
+    TITLE_KEYWORDS = [
+        "data", "analytics", "platform", "software", "intelligence",
+        "modernization", "investigation", "law enforcement", "public safety",
+        "corrections", "supervision", "cloud", "ai", "system", "information",
+    ]
+    title_matches = [
+        o for o in non_events
+        if o.tier not in ("⛔ Not a Fit", "⛔ Expired")
+        and any(kw in o.title.lower() for kw in TITLE_KEYWORDS)
+    ]
+    return sorted(title_matches, key=lambda x: x.score, reverse=True)[:10]
+
+
 def build_section(title: str, opps: list[Opportunity]) -> str:
     if not opps:
         return f"""
@@ -1122,7 +1167,9 @@ def build_html_email(opps: list[Opportunity], run_date: str,
                      competitor_items: list = None, growth_items: list = None,
                      funding_items: list = None) -> str:
     # Exclude events from solicitation tiers so stats bar reflects actual RFI/RFP counts
-    non_events = [o for o in opps if o.source != "Events Intelligence"]
+    # Separate solicitations from award intel — awards are intel only, not active opps
+    non_events = [o for o in opps if o.source not in ("Events Intelligence", "USASpending.gov")]
+    usa_intel  = [o for o in opps if o.source == "USASpending.gov"]
     tiers = {
         "strong":   [o for o in non_events if "Strong" in o.tier],
         "good":     [o for o in non_events if "Good" in o.tier],
@@ -1130,7 +1177,6 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     }
     ind_days  = [o for o in opps if o.opp_type == "Industry Day"]
     fr_rfis   = [o for o in opps if o.source == "Federal Register"]
-    usa_intel = [o for o in opps if o.source == "USASpending.gov"]
     signals   = [o for o in opps if o.source == "Congress.gov"]
     events    = [o for o in opps if o.source == "Events Intelligence"]
 
@@ -1182,9 +1228,9 @@ def build_html_email(opps: list[Opportunity], run_date: str,
 
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
-  {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
+  {build_section("🔵 Possible Fit — Review These", _possible_fits(non_events, tiers))}
   {build_section("⚪ Low Fit — Any Keyword Match (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0])}
-  {build_section("🏆 Award Intel (Recent Contract Wins)", usa_intel[:8])}
+  {build_award_intel_section(usa_intel[:5])}
   {build_competitor_section(competitor_items or [], growth_items=growth_items or [])}
   {build_funding_section(funding_items or [])}
   {build_news_section(news_items or [])}
@@ -1974,6 +2020,35 @@ def fetch_growth_news() -> list[dict]:
 
     print(f"[Growth News] {len(news_items)} market signal articles found")
     return news_items[:12]
+
+
+def build_award_intel_section(awards: list) -> str:
+    """Compact award intel — just a few recent contract wins in Peregrine's space."""
+    if not awards:
+        return ""  # If no awards, omit section entirely
+
+    rows = ""
+    for a in awards:
+        amount_text = ""
+        # Extract dollar amount from description if present
+        import re as _re
+        amt_match = _re.search(r"\$([\d,]+)", a.description)
+        if amt_match:
+            amount_text = f" · <strong>{amt_match.group(0)}</strong>"
+
+        link = ('<a href="' + a.url + '" style="color:#0057b8;text-decoration:none;font-weight:600;">' + a.title[:80] + '</a>') if a.url else ('<span style="font-weight:600;">' + a.title[:80] + '</span>')
+        rows += f"""
+        <div style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px;">
+          <div>{link}{amount_text}</div>
+          <div style="color:#888;margin-top:2px;">🏛 {a.agency[:60]} · {a.posted_date[:10]}</div>
+        </div>"""
+
+    return f"""
+    <div style="margin:20px 0 6px">
+      <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">📊 Award Intel — Recent Contract Wins (top {len(awards)})</h2>
+      <p style="font-size:12px;color:#888;margin:0 0 8px;">Recent awards in Peregrine's space — competitive landscape intel only, not active solicitations.</p>
+      {rows}
+    </div>"""
 
 
 def build_competitor_section(intel_items: list, growth_items: list = None) -> str:
