@@ -395,7 +395,11 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
             if opp.naics.startswith(prefix):
                 naics_hint = hint
                 break
-    text = f"{opp.title} {opp.description} {opp.agency} {naics_hint}".lower()
+    # Score only against title + description + NAICS hints
+    # Agency name intentionally excluded — an agency match alone is not a capability fit
+    text = f"{opp.title} {opp.description} {naics_hint}".lower()
+    # Keep agency text separate for display only
+    agency_text = opp.agency.lower()
     for excl in HARD_EXCLUSIONS:
         if excl.lower() in text:
             opp.score = -1
@@ -967,7 +971,7 @@ def fetch_industry_news() -> list[dict]:
                 news_items.append({
                     "title": title,
                     "source": feed["source"],
-                    "url": url_,
+                    "url": clean_url(url_, ""),
                     "date": date_[:16] if date_ else today.strftime("%Y-%m-%d"),
                     "summary": desc[:300],
                 })
@@ -1109,7 +1113,7 @@ def build_news_section(news_items: list) -> str:
             summary += "..."
         bullets += f"""
         <li style="margin-bottom:10px;line-height:1.4;">
-          <a href="{item['url']}" style="font-weight:600;color:#0057b8;text-decoration:none;">{item['title'][:100]}</a>
+          {f'<a href="{item['url']}" style="font-weight:600;color:#0057b8;text-decoration:none;">{item['title'][:100]}</a>' if item.get('url') else f'<span style="font-weight:600;color:#333;">{item['title'][:100]}</span>'}
           <span style="font-size:11px;color:#888;margin-left:6px;">{item['source']} · {item['date'][:10]}</span>
           {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
         </li>"""
@@ -1497,7 +1501,7 @@ def fetch_events_intelligence() -> list[Opportunity]:
             posted_date=today.strftime("%Y-%m-%d"),
             response_date=f"Typically {ev.get('typical_month', 'varies')} — check site",
             description=desc,
-            url=ev["url"],
+            url=clean_url(ev.get("url", ""), "https://sam.gov/search"),
             opp_type="Conference/Event",
             source="Events Intelligence",
         )
