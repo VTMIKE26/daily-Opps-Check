@@ -1126,7 +1126,8 @@ def build_news_section(news_items: list) -> str:
 
 
 def build_html_email(opps: list[Opportunity], run_date: str,
-                     source_counts: dict, news_items: list = None) -> str:
+                     source_counts: dict, news_items: list = None,
+                     competitor_items: list = None) -> str:
     # Exclude events from solicitation tiers so stats bar reflects actual RFI/RFP counts
     non_events = [o for o in opps if o.source != "Events Intelligence"]
     tiers = {
@@ -1190,7 +1191,8 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
   {build_section("⚪ Low Fit — Weak Signal (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and any(r.startswith("✓") for r in o.score_reasons)])}
-  {build_section("🔍 Competitive Intel (Recent Awards)", usa_intel[:8])}
+  {build_section("🏆 Award Intel (Recent Contract Wins)", usa_intel[:8])}
+  {build_competitor_section(competitor_items or [])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
 
@@ -1514,6 +1516,162 @@ def fetch_events_intelligence() -> list[Opportunity]:
     return results
 
 # ---------------------------------------------------------------------------
+# COMPETITOR INTELLIGENCE
+# Monitors news on Peregrine's key competitors across its core verticals:
+# law enforcement analytics, data integration, corrections supervision.
+# ---------------------------------------------------------------------------
+
+COMPETITORS = [
+    # Direct law enforcement / public safety analytics competitors
+    {"name": "Palantir",        "search": "Palantir law enforcement government contract",    "tags": ["palantir"]},
+    {"name": "Axon",            "search": "Axon public safety technology platform",           "tags": ["axon"]},
+    {"name": "ShotSpotter",     "search": "ShotSpotter gunshot detection contract award",     "tags": ["shotspotter"]},
+    {"name": "Mark43",          "search": "Mark43 records management police software",        "tags": ["mark43"]},
+    {"name": "Tyler Technologies","search": "Tyler Technologies criminal justice software",   "tags": ["tyler technologies"]},
+    {"name": "Motorola Solutions","search": "Motorola Solutions public safety platform",      "tags": ["motorola solutions"]},
+    # Data integration / intelligence platforms
+    {"name": "IBM i2",          "search": "IBM i2 law enforcement analytics",                 "tags": ["ibm i2", "ibm"]},
+    {"name": "Esri",            "search": "Esri geospatial law enforcement government",       "tags": ["esri"]},
+    {"name": "Databricks",      "search": "Databricks government federal data platform",      "tags": ["databricks"]},
+    # Corrections / supervision
+    {"name": "Appriss",         "search": "Appriss corrections supervision software award",   "tags": ["appriss"]},
+    {"name": "SuperCom",        "search": "SuperCom offender monitoring supervision",         "tags": ["supercom"]},
+]
+
+# RSS feeds that carry competitor news
+COMPETITOR_NEWS_FEEDS = [
+    {"url": "https://fedscoop.com/feed/",                   "source": "FedScoop"},
+    {"url": "https://www.nextgov.com/rss/all/",             "source": "Nextgov"},
+    {"url": "https://gcn.com/rss-feeds/all.aspx",           "source": "GCN"},
+    {"url": "https://www.govtech.com/public-safety/rss.xml","source": "GovTech"},
+    {"url": "https://www.police1.com/rss/all/",             "source": "Police1"},
+    {"url": "https://www.corrections1.com/rss/all/",        "source": "Corrections1"},
+    {"url": "https://www.govtech.com/security/rss.xml",     "source": "GovTech Security"},
+]
+
+def fetch_competitor_intel() -> list[dict]:
+    """
+    Scan news feeds for mentions of key competitors.
+    Returns list of dicts: {competitor, title, url, source, date, summary, tags_found}
+    """
+    items_out = []
+    seen_titles = set()
+
+    # Build a flat lookup: tag → competitor name
+    tag_map = {}
+    for comp in COMPETITORS:
+        for tag in comp["tags"]:
+            tag_map[tag.lower()] = comp["name"]
+
+    all_tags = list(tag_map.keys())
+
+    for feed in COMPETITOR_NEWS_FEEDS:
+        try:
+            resp = requests.get(feed["url"], headers={
+                "User-Agent": "PeregrineScanner/2.0",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            }, timeout=15)
+            if resp.status_code != 200:
+                print(f"[CompetitorIntel] {feed['source']}: HTTP {resp.status_code}")
+                continue
+
+            root = ET.fromstring(resp.content)
+            feed_items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+
+            for item in feed_items[:15]:
+                title_el = item.find("title")
+                link_el  = item.find("link")
+                desc_el  = item.find("description") or item.find("summary")
+                date_el  = item.find("pubDate") or item.find("published")
+
+                title = (title_el.text or "").strip() if title_el is not None else ""
+                desc  = unescape(re.sub(r"<[^>]+>", "", (desc_el.text or ""))).strip() if desc_el is not None else ""
+                url_  = (link_el.text or "").strip() if link_el is not None else ""
+                date_ = (date_el.text or "").strip() if date_el is not None else ""
+
+                if not title or title in seen_titles:
+                    continue
+
+                combined = f"{title} {desc}".lower()
+
+                # Find which competitors are mentioned
+                tags_found = [tag_map[tag] for tag in all_tags if tag in combined]
+                if not tags_found:
+                    continue
+
+                seen_titles.add(title)
+                items_out.append({
+                    "competitor": ", ".join(sorted(set(tags_found))),
+                    "title": title,
+                    "url": clean_url(url_, ""),
+                    "source": feed["source"],
+                    "date": date_[:10] if date_ else "",
+                    "summary": desc[:250],
+                })
+
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[CompetitorIntel] {feed['source']}: {e}")
+
+    # Sort by competitor name, then deduplicate same story from multiple feeds
+    seen_story_titles = set()
+    deduped = []
+    for item in sorted(items_out, key=lambda x: x["competitor"]):
+        if item["title"] not in seen_story_titles:
+            seen_story_titles.add(item["title"])
+            deduped.append(item)
+
+    print(f"[Competitor Intel] {len(deduped)} stories found across {len(COMPETITORS)} competitors")
+    return deduped[:20]
+
+
+def build_competitor_section(intel_items: list) -> str:
+    """Render competitor news as a clean grouped section."""
+    if not intel_items:
+        return """
+        <div style="margin:20px 0 6px">
+          <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">🔎 Competitor Intelligence</h2>
+          <p style="color:#aaa;font-size:13px;font-style:italic">No competitor news found today.</p>
+        </div>"""
+
+    # Group by competitor
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    for item in intel_items:
+        for comp in item["competitor"].split(", "):
+            grouped[comp.strip()].append(item)
+
+    rows = ""
+    for comp_name in sorted(grouped.keys()):
+        stories = grouped[comp_name][:3]  # max 3 per competitor
+        story_html = ""
+        for s in stories:
+            link = ('<a href="' + s["url"] + '" style="color:#0057b8;text-decoration:none;font-weight:600;">' + s["title"][:90] + '</a>') if s.get("url") else ('<span style="font-weight:600;color:#333;">' + s["title"][:90] + '</span>')
+            summary = s.get("summary", "")[:200]
+            story_html += f"""
+            <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #f0f0f0;">
+              <div style="font-size:13px;">{link}</div>
+              <div style="font-size:11px;color:#888;margin-top:2px;">{s['source']} · {s['date']}</div>
+              {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
+            </div>"""
+
+        rows += f"""
+        <div style="margin-bottom:14px;">
+          <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">
+            ⚔️ {comp_name}
+          </div>
+          {story_html}
+        </div>"""
+
+    return f"""
+    <div style="margin:20px 0 6px">
+      <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">🔎 Competitor Intelligence ({len(intel_items)} stories)</h2>
+      <p style="font-size:12px;color:#888;margin:0 0 12px;">Monitoring: {", ".join(c["name"] for c in COMPETITORS)}</p>
+      {rows}
+    </div>"""
+
+
+# ---------------------------------------------------------------------------
 # EMAIL SEND — via SendGrid API (no SMTP, no credentials beyond API key)
 # ---------------------------------------------------------------------------
 def send_email(html_body: str, subject: str):
@@ -1631,8 +1789,18 @@ def main():
         news_items = []
         source_counts["Industry News"] = 0
 
+    # Fetch competitor intelligence
+    print("\n[Competitor Intel] Scanning for competitor news...")
+    try:
+        competitor_items = fetch_competitor_intel()
+        source_counts["Competitor Intel"] = len(competitor_items)
+    except Exception as e:
+        print(f"[Competitor Intel] Error: {e}")
+        competitor_items = []
+        source_counts["Competitor Intel"] = 0
+
     # Build and send
-    html = build_html_email(ranked, run_date, source_counts, news_items=news_items)
+    html = build_html_email(ranked, run_date, source_counts, news_items=news_items, competitor_items=competitor_items)
     send_email(html, subject)
 
     # Save local copy
