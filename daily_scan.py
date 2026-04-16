@@ -553,35 +553,46 @@ def fetch_sam_gov() -> list[Opportunity]:
         # Catch any data analytics RFI regardless of agency acronym
         "data analytics solution",
         "analytics solution",
+        # Direct match for known missed opportunities
+        "ATR IT modernization",
+        "data analytics solution",
     ]:
 
 
         try:
             resp = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "keywords": kw,
-                        "postedFrom": (today - timedelta(days=10)).strftime("%m/%d/%Y"),
-                        "postedTo": (today + timedelta(days=60)).strftime("%m/%d/%Y"),
-                        "noticetype": "i", "limit": 25},
+                params={
+                    "api_key": SAM_API_KEY,
+                    "keyword": kw,          # singular — SAM.gov API v2 requirement
+                    "postedFrom": from_date, # same 60-day window as daily fetch
+                    "postedTo": to_date,
+                    # NO noticetype filter — search ALL types for each keyword
+                    "limit": 25,
+                },
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
-            for item in resp.json().get("opportunitiesData", []):
+            data = resp.json()
+            items = data.get("opportunitiesData", [])
+            if items:
+                print(f"[SAM.gov keyword '{kw}'] {data.get('totalRecords',0)} total, {len(items)} returned")
+            for item in items:
                 opp = Opportunity(
                     title=item.get("title", "Untitled"),
                     notice_id=item.get("noticeId", ""),
-                    agency=item.get("fullParentPathName", "Unknown"),
+                    agency=item.get("fullParentPathName", item.get("departmentName", "Unknown")),
                     posted_date=item.get("postedDate", ""),
                     response_date=item.get("responseDeadLine", "TBD"),
                     description=(item.get("description", "") or "")[:2000],
                     url=clean_url(f"https://sam.gov/opp/{item.get('noticeId','')}/view", "https://sam.gov/search"),
-                    opp_type="Industry Day",
+                    opp_type=item.get("type", "Solicitation"),
                     source="SAM.gov",
                     naics=item.get("naicsCode", ""),
                 )
                 results.append(score_opportunity(opp))
         except Exception as e:
-            print(f"[SAM.gov broad] Error: {e}")
+            print(f"[SAM.gov keyword '{kw}'] Error: {e}")
 
     print(f"[SAM.gov] {len(results)} notices fetched")
     return results
@@ -1521,12 +1532,15 @@ def fetch_events_intelligence() -> list[Opportunity]:
         upcoming_note = ""
         if ev_month > 0:
             months_away = (ev_month - current_month) % 12
+            # Skip events more than 3 months out
+            if months_away > 3:
+                continue
             if months_away == 0:
                 upcoming_note = "⚡ THIS MONTH"
+            elif months_away == 1:
+                upcoming_note = "📆 Next month"
             elif months_away <= 3:
-                upcoming_note = f"📆 ~{months_away} month(s) away"
-            else:
-                upcoming_note = f"🗓 Typically {ev['typical_month']}"
+                upcoming_note = f"📆 ~{months_away} months away"
         else:
             upcoming_note = "🔄 Ongoing / check for dates"
 
