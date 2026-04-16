@@ -98,12 +98,16 @@ def parse_date_flexible(date_str: str):
     return None
 
 def is_expired(opp) -> bool:
-    """Return True if the response deadline has clearly passed (2-day grace)."""
+    """
+    Return True ONLY if the response deadline has clearly passed.
+    Only checks response_date — never posted_date (which is always in the past).
+    If response_date is TBD/unparseable, assume still active.
+    """
     grace = datetime.utcnow() - timedelta(days=2)
-    for date_str in [opp.response_date, opp.posted_date]:
-        dt = parse_date_flexible(date_str)
-        if dt:
-            return dt < grace
+    dt = parse_date_flexible(opp.response_date)
+    if dt:
+        return dt < grace
+    # TBD or unparseable deadline = assume still open
     return False
 
 def clean_url(url: str, fallback: str = "") -> str:
@@ -487,10 +491,10 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 def fetch_sam_gov() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    from_date = (today - timedelta(days=10)).strftime("%m/%d/%Y")
+    from_date = (today - timedelta(days=30)).strftime("%m/%d/%Y")
     to_date = today.strftime("%m/%d/%Y")
 
-    notice_types = {"r": "RFI", "s": "Sources Sought", "i": "Industry Day", "p": "Pre-Solicitation"}
+    notice_types = {"r": "RFI", "s": "Sources Sought", "i": "Industry Day", "p": "Pre-Solicitation", "o": "Solicitation", "k": "Award", "g": "Sale of Surplus Property", "a": "Special Notice"}
 
     for code, label in notice_types.items():
         try:
@@ -520,48 +524,29 @@ def fetch_sam_gov() -> list[Opportunity]:
 
     # Also run broad keyword search for industry days 60 days out
     for kw in [
-        # Data Integration & Unification
-        "data integration platform",
-        "enterprise data platform",
-        "data unification",
-        "disparate data sources",
-        "data fusion platform",
-        # Investigative & Operational Analytics
-        "investigative analytics platform",
-        "law enforcement analytics",
-        "operational intelligence dashboard",
-        "crime analytics platform",
-        "situational awareness platform",
+        # Data Integration
+        "data analytics", "data integration", "analytics platform",
+        "data management", "data platform", "analytics solution",
+        # Investigative
+        "investigative platform", "crime analytics", "situational awareness",
+        "intelligence platform", "link analysis",
         # Federated Search
-        "federated search capability",
-        "enterprise search platform",
-        "cross system search",
+        "federated search", "enterprise search",
         # Entity Resolution
-        "entity resolution platform",
-        "record deduplication",
-        # Secure SaaS
-        "fedramp law enforcement",
-        "cjis compliant platform",
+        "entity resolution", "record deduplication",
         # Public Safety
-        "public safety data platform",
-        "crime gun intelligence",
-        "nibin analytics",
-        "fusion center platform",
+        "law enforcement platform", "public safety software",
+        "crime gun intelligence", "nibin", "fusion center",
         # Corrections
-        "community supervision platform",
-        "offender management system",
-        "probation parole data",
+        "community supervision", "offender management", "probation",
         # Modernization
-        "palantir replacement",
-        "legacy platform modernization",
-        "data platform replacement",
-        # AI cluster
+        "it modernization", "legacy modernization", "palantir replacement",
+        "platform modernization", "digital transformation",
+        # AI
         "artificial intelligence law enforcement",
-        "machine learning public safety",
-        "ai analytics platform government",
-        "generative ai federal agency",
-        "nlp investigative platform",
+        "machine learning analytics", "predictive analytics",
     ]:
+
 
         try:
             resp = requests.get(
