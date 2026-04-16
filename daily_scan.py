@@ -1113,7 +1113,7 @@ def build_news_section(news_items: list) -> str:
             summary += "..."
         bullets += f"""
         <li style="margin-bottom:10px;line-height:1.4;">
-          {f'<a href="{item['url']}" style="font-weight:600;color:#0057b8;text-decoration:none;">{item['title'][:100]}</a>' if item.get('url') else f'<span style="font-weight:600;color:#333;">{item['title'][:100]}</span>'}
+          {('<a href="' + item['url'] + '" style="font-weight:600;color:#0057b8;text-decoration:none;">' + item['title'][:100] + '</a>') if item.get('url') else ('<span style="font-weight:600;color:#333;">' + item['title'][:100] + '</span>')}
           <span style="font-size:11px;color:#888;margin-left:6px;">{item['source']} · {item['date'][:10]}</span>
           {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
         </li>"""
