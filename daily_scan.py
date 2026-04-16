@@ -1127,7 +1127,7 @@ def build_news_section(news_items: list) -> str:
 
 def build_html_email(opps: list[Opportunity], run_date: str,
                      source_counts: dict, news_items: list = None,
-                     competitor_items: list = None) -> str:
+                     competitor_items: list = None, growth_items: list = None) -> str:
     # Exclude events from solicitation tiers so stats bar reflects actual RFI/RFP counts
     non_events = [o for o in opps if o.source != "Events Intelligence"]
     tiers = {
@@ -1192,7 +1192,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
   {build_section("⚪ Low Fit — Weak Signal (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and any(r.startswith("✓") for r in o.score_reasons)])}
   {build_section("🏆 Award Intel (Recent Contract Wins)", usa_intel[:8])}
-  {build_competitor_section(competitor_items or [])}
+  {build_competitor_section(competitor_items or [], growth_items=growth_items or [])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
 
@@ -1625,13 +1625,122 @@ def fetch_competitor_intel() -> list[dict]:
     return deduped[:20]
 
 
-def build_competitor_section(intel_items: list) -> str:
-    """Render competitor news as a clean grouped section."""
+def fetch_growth_news() -> list[dict]:
+    """
+    When no competitor news is available, pull broader federal market signals
+    relevant to Peregrine's growth: federal IT budgets, law enforcement funding,
+    AI in government, corrections reform, procurement policy changes.
+    """
+    today = datetime.utcnow()
+    news_items = []
+    seen_titles = set()
+
+    # Same feeds as competitor intel
+    feeds = [
+        {"url": "https://fedscoop.com/feed/",                    "source": "FedScoop"},
+        {"url": "https://www.nextgov.com/rss/all/",              "source": "Nextgov"},
+        {"url": "https://gcn.com/rss-feeds/all.aspx",            "source": "GCN"},
+        {"url": "https://www.govtech.com/public-safety/rss.xml", "source": "GovTech"},
+        {"url": "https://www.police1.com/rss/all/",              "source": "Police1"},
+        {"url": "https://www.corrections1.com/rss/all/",         "source": "Corrections1"},
+        {"url": "https://www.federaltimes.com/rss/",             "source": "Federal Times"},
+    ]
+
+    # Growth signals relevant to Peregrine's federal expansion
+    growth_keywords = [
+        # Budget & spending signals
+        "federal it budget", "it modernization funding", "technology investment",
+        "federal procurement", "contract award", "task order",
+        # Law enforcement expansion
+        "law enforcement technology", "police technology", "public safety funding",
+        "crime reduction funding", "violent crime", "gun violence funding",
+        "community policing", "smart policing",
+        # Corrections & supervision
+        "corrections reform", "criminal justice reform", "reentry program",
+        "supervision technology", "pretrial reform",
+        # AI & data in government
+        "ai government", "artificial intelligence federal", "machine learning government",
+        "data analytics government", "federal data strategy",
+        "predictive policing", "crime analytics",
+        # Policy & regulatory signals
+        "fedramp", "cjis update", "data sharing legislation",
+        "bipartisan safer communities", "safer streets",
+        "doj grant", "bja grant", "cops grant", "justice grant",
+    ]
+
+    for feed in feeds:
+        try:
+            resp = requests.get(feed["url"], headers={
+                "User-Agent": "PeregrineScanner/2.0",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            }, timeout=15)
+            if resp.status_code != 200:
+                continue
+
+            root = ET.fromstring(resp.content)
+            items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+
+            for item in items[:10]:
+                title_el = item.find("title")
+                link_el  = item.find("link")
+                desc_el  = item.find("description") or item.find("summary")
+                date_el  = item.find("pubDate") or item.find("published")
+
+                title = (title_el.text or "").strip() if title_el is not None else ""
+                desc  = unescape(re.sub(r"<[^>]+>", "", (desc_el.text or ""))).strip() if desc_el is not None else ""
+                url_  = (link_el.text or "").strip() if link_el is not None else ""
+                date_ = (date_el.text or "").strip() if date_el is not None else ""
+
+                if not title or title in seen_titles:
+                    continue
+
+                combined = f"{title} {desc}".lower()
+                if not any(kw in combined for kw in growth_keywords):
+                    continue
+
+                seen_titles.add(title)
+                news_items.append({
+                    "title": title,
+                    "url": clean_url(url_, ""),
+                    "source": feed["source"],
+                    "date": date_[:10] if date_ else "",
+                    "summary": desc[:250],
+                })
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[GrowthNews] {feed['source']}: {e}")
+
+    print(f"[Growth News] {len(news_items)} market signal articles found")
+    return news_items[:12]
+
+
+def build_competitor_section(intel_items: list, growth_items: list = None) -> str:
+    """Render competitor news, falling back to growth/market signals if empty."""
     if not intel_items:
-        return """
+        # Fall back to federal market growth signals
+        growth_items = growth_items or []
+        if not growth_items:
+            return """
+            <div style="margin:20px 0 6px">
+              <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">📈 Federal Market Intelligence</h2>
+              <p style="color:#aaa;font-size:13px;font-style:italic">No competitor or market news found today.</p>
+            </div>"""
+
+        bullets = ""
+        for item in growth_items[:10]:
+            link = ('<a href="' + item["url"] + '" style="font-weight:600;color:#0057b8;text-decoration:none;">' + item["title"][:100] + '</a>') if item.get("url") else ('<span style="font-weight:600;color:#333;">' + item["title"][:100] + '</span>')
+            summary = item.get("summary", "")[:200]
+            bullets += f"""
+            <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f0f0f0;">
+              <div style="font-size:13px;">{link}</div>
+              <div style="font-size:11px;color:#888;margin-top:2px;">{item['source']} · {item['date']}</div>
+              {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
+            </div>"""
+        return f"""
         <div style="margin:20px 0 6px">
-          <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">🔎 Competitor Intelligence</h2>
-          <p style="color:#aaa;font-size:13px;font-style:italic">No competitor news found today.</p>
+          <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">📈 Federal Market Intelligence — Growth Signals ({len(growth_items)})</h2>
+          <p style="font-size:12px;color:#888;margin:0 0 12px;">No competitor news today — here are relevant federal market signals for Peregrine's growth.</p>
+          {bullets}
         </div>"""
 
     # Group by competitor
@@ -1799,8 +1908,17 @@ def main():
         competitor_items = []
         source_counts["Competitor Intel"] = 0
 
+    # Fetch growth/market signals as fallback if no competitor news
+    growth_items = []
+    if not competitor_items:
+        print("\n[Growth News] No competitor news — fetching market signals...")
+        try:
+            growth_items = fetch_growth_news()
+        except Exception as e:
+            print(f"[Growth News] Error: {e}")
+
     # Build and send
-    html = build_html_email(ranked, run_date, source_counts, news_items=news_items, competitor_items=competitor_items)
+    html = build_html_email(ranked, run_date, source_counts, news_items=news_items, competitor_items=competitor_items, growth_items=growth_items)
     send_email(html, subject)
 
     # Save local copy
