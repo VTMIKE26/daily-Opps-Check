@@ -489,112 +489,147 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 # Requires: SAM_API_KEY (free at sam.gov)
 # ---------------------------------------------------------------------------
 def fetch_sam_gov() -> list[Opportunity]:
+    """
+    SAM.gov API v2 — capability-first search strategy.
+    
+    Instead of fetching all notices by type (which returns thousands of irrelevant
+    results), we search directly by capability keywords tied to Peregrine's 9 clusters.
+    This ensures we catch opportunities like "ATR IT MODERNIZATION: DATA ANALYTICS SOLUTION"
+    that would be missed by type-only fetching if outside the date window.
+    
+    Two passes:
+      1. Keyword search — one call per capability term, ALL notice types, 90-day window
+      2. Type sweep — broad fetch of RFI/Sources Sought from last 30 days as safety net
+    """
     results = []
+    seen_ids = set()
     today = datetime.utcnow()
-    from_date = (today - timedelta(days=60)).strftime("%m/%d/%Y")
+    from_date_90 = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    from_date_30 = (today - timedelta(days=30)).strftime("%m/%d/%Y")
     to_date = today.strftime("%m/%d/%Y")
 
-    notice_types = {"r": "RFI", "s": "Sources Sought", "i": "Industry Day", "p": "Pre-Solicitation", "o": "Solicitation", "k": "Award", "g": "Sale of Surplus Property", "a": "Special Notice"}
+    if not SAM_API_KEY:
+        print("[SAM.gov] No API key — skipping")
+        return []
 
-    for code, label in notice_types.items():
-        try:
-            resp = requests.get(
-                "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "postedFrom": from_date,
-                        "postedTo": to_date, "noticetype": code, "limit": 100},
-                headers=HEADERS, timeout=30
-            )
-            resp.raise_for_status()
-            for item in resp.json().get("opportunitiesData", []):
-                opp = Opportunity(
-                    title=item.get("title", "Untitled"),
-                    notice_id=item.get("noticeId", ""),
-                    agency=item.get("fullParentPathName", item.get("departmentName", "Unknown")),
-                    posted_date=item.get("postedDate", ""),
-                    response_date=item.get("responseDeadLine", "TBD"),
-                    description=(item.get("description", "") or "")[:2000],
-                    url=clean_url(f"https://sam.gov/opp/{item.get('noticeId','')}/view", "https://sam.gov/search"),
-                    opp_type=label,
-                    source="SAM.gov",
-                    naics=item.get("naicsCode", ""),
-                )
-                results.append(score_opportunity(opp))
-        except Exception as e:
-            print(f"[SAM.gov] Error fetching {label}: {e}")
-
-    # Also run broad keyword search for industry days 60 days out
-    for kw in [
-        # Data Integration
-        "data analytics", "data integration", "analytics platform",
-        "data management", "data platform", "analytics solution",
-        # Investigative
-        "investigative platform", "crime analytics", "situational awareness",
-        "intelligence platform", "link analysis",
+    # ── PASS 1: Capability keyword search (90-day window, all notice types) ────
+    # Each term maps directly to a Peregrine capability cluster
+    # Short 1-3 word terms that appear verbatim in solicitation titles
+    CAPABILITY_KEYWORDS = [
+        # Data Integration & Unification
+        "data integration", "data analytics", "data management platform",
+        "data unification", "enterprise data", "data fusion",
+        "information sharing", "analytics platform", "analytics solution",
+        # Investigative & Operational Analytics  
+        "investigative analytics", "crime analytics", "operational intelligence",
+        "situational awareness", "link analysis", "geospatial analytics",
+        "predictive analytics", "intelligence platform",
         # Federated Search
         "federated search", "enterprise search",
         # Entity Resolution
-        "entity resolution", "record deduplication",
-        # Public Safety
-        "law enforcement platform", "public safety software",
-        "crime gun intelligence", "nibin", "fusion center",
-        # Corrections
-        "community supervision", "offender management", "probation",
-        # Modernization
-        "it modernization", "legacy modernization", "palantir replacement",
-        "platform modernization", "digital transformation",
-        # AI
-        "artificial intelligence law enforcement",
-        "machine learning analytics", "predictive analytics",
-        # Catch IT modernization + data analytics combo titles
-        "IT modernization data analytics",
-        "data analytics modernization",
-        "modernization analytics solution",
-        "analytics solution modernization",
-        # Catch any data analytics RFI regardless of agency acronym
-        "data analytics solution",
-        "analytics solution",
-        # Direct match for known missed opportunities
-        "ATR IT modernization",
-        "data analytics solution",
-    ]:
+        "entity resolution", "record deduplication", "identity resolution",
+        # Public Safety & Law Enforcement
+        "law enforcement analytics", "public safety platform",
+        "records management system", "computer-aided dispatch",
+        "crime gun intelligence", "fusion center",
+        # Corrections & Supervision
+        "community supervision", "offender management",
+        "corrections data", "probation supervision",
+        # Modernization & Replacement
+        "IT modernization", "platform modernization", "legacy modernization",
+        "digital transformation", "palantir",
+        # AI / ML
+        "artificial intelligence", "machine learning",
+        "AI platform", "predictive policing",
+        # Secure SaaS
+        "fedramp", "cjis compliance",
+    ]
 
-
+    for kw in CAPABILITY_KEYWORDS:
         try:
             resp = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
                 params={
                     "api_key": SAM_API_KEY,
-                    "keyword": kw,          # singular — SAM.gov API v2 requirement
-                    "postedFrom": from_date, # same 60-day window as daily fetch
+                    "keyword": kw,
+                    "postedFrom": from_date_90,
                     "postedTo": to_date,
-                    # NO noticetype filter — search ALL types for each keyword
                     "limit": 25,
+                    # NO noticetype filter — catch everything
                 },
                 headers=HEADERS, timeout=30
             )
             resp.raise_for_status()
             data = resp.json()
             items = data.get("opportunitiesData", [])
+            total = data.get("totalRecords", 0)
             if items:
-                print(f"[SAM.gov keyword '{kw}'] {data.get('totalRecords',0)} total, {len(items)} returned")
+                print(f"[SAM.gov keyword '{kw}'] {total} total, {len(items)} fetched")
             for item in items:
+                nid = item.get("noticeId", "")
+                if nid in seen_ids:
+                    continue
+                seen_ids.add(nid)
                 opp = Opportunity(
                     title=item.get("title", "Untitled"),
-                    notice_id=item.get("noticeId", ""),
+                    notice_id=nid,
                     agency=item.get("fullParentPathName", item.get("departmentName", "Unknown")),
                     posted_date=item.get("postedDate", ""),
                     response_date=item.get("responseDeadLine", "TBD"),
                     description=(item.get("description", "") or "")[:2000],
-                    url=clean_url(f"https://sam.gov/opp/{item.get('noticeId','')}/view", "https://sam.gov/search"),
-                    opp_type=item.get("type", "Solicitation"),
+                    url=clean_url(f"https://sam.gov/opp/{nid}/view", "https://sam.gov/search"),
+                    opp_type=item.get("type", item.get("baseType", "Notice")),
+                    source="SAM.gov",
+                    naics=item.get("naicsCode", ""),
+                )
+                results.append(score_opportunity(opp))
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[SAM.gov keyword '{kw}'] Error: {e}")
+
+    print(f"[SAM.gov] Pass 1 (keyword): {len(results)} unique opportunities")
+    kw_count = len(results)
+
+    # ── PASS 2: Type sweep — safety net for last 30 days ──────────────────────
+    # Catches opportunities with unusual titles that keywords might miss
+    for code, label in {"r": "RFI", "s": "Sources Sought", "p": "Pre-Solicitation"}.items():
+        try:
+            resp = requests.get(
+                "https://api.sam.gov/opportunities/v2/search",
+                params={
+                    "api_key": SAM_API_KEY,
+                    "postedFrom": from_date_30,
+                    "postedTo": to_date,
+                    "noticetype": code,
+                    "limit": 100,
+                },
+                headers=HEADERS, timeout=30
+            )
+            resp.raise_for_status()
+            for item in resp.json().get("opportunitiesData", []):
+                nid = item.get("noticeId", "")
+                if nid in seen_ids:
+                    continue
+                seen_ids.add(nid)
+                opp = Opportunity(
+                    title=item.get("title", "Untitled"),
+                    notice_id=nid,
+                    agency=item.get("fullParentPathName", item.get("departmentName", "Unknown")),
+                    posted_date=item.get("postedDate", ""),
+                    response_date=item.get("responseDeadLine", "TBD"),
+                    description=(item.get("description", "") or "")[:2000],
+                    url=clean_url(f"https://sam.gov/opp/{nid}/view", "https://sam.gov/search"),
+                    opp_type=label,
                     source="SAM.gov",
                     naics=item.get("naicsCode", ""),
                 )
                 results.append(score_opportunity(opp))
         except Exception as e:
-            print(f"[SAM.gov keyword '{kw}'] Error: {e}")
+            print(f"[SAM.gov type sweep {label}] Error: {e}")
 
-    print(f"[SAM.gov] {len(results)} notices fetched")
+    sweep_count = len(results) - kw_count
+    print(f"[SAM.gov] Pass 2 (type sweep): {sweep_count} additional unique opportunities")
+    print(f"[SAM.gov] Total: {len(results)} opportunities fetched")
     return results
 
 
