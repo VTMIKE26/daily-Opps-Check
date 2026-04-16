@@ -419,26 +419,33 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     reasons = []
     clusters_matched = 0
     title_only = opp.title.lower()
-    saas_hits = []  # Track SaaS hits separately — only count if core cluster also matches
+    saas_hits = []  # Track SaaS hits separately — only count if core cluster also matched
 
     for cap_name, cap_points, phrases in CAPABILITY_CLUSTERS:
-        hits = [p for p in phrases if p.lower() in text]
-        # When description is missing/short, also match against title alone
-        if not hits and len(opp.description) < 80:
-            hits = [p for p in phrases if p.lower() in title_only]
-        if not hits:
+        # Always check title independently — SAM.gov often has rich titles but empty descriptions
+        # A title match alone is always meaningful and should always score
+        title_hits = [p for p in phrases if p.lower() in title_only]
+        desc_hits  = [p for p in phrases if p.lower() in text]
+        # Merge, deduplicate, prefer longer (more specific) phrases
+        all_hits = list({p: None for p in (title_hits + desc_hits)}.keys())
+
+        if not all_hits:
             continue
 
-        # Secure SaaS cluster: defer scoring — only add if a core cap also matched
+        # Flag if this was a title-only match so we can note it
+        title_only_match = bool(title_hits) and not bool(desc_hits)
+
+        # Secure SaaS cluster: defer — only count if a core cluster also matched
         if cap_name.startswith("Secure Government SaaS"):
-            saas_hits = hits
+            saas_hits = all_hits
             continue
 
         score += cap_points
         clusters_matched += 1
-        top_hits = sorted(hits, key=len, reverse=True)[:3]
-        reasons.append(f"✓ {cap_name}: matched '{top_hits[0]}'" +
-                      (f" + {len(hits)-1} more" if len(hits) > 1 else ""))
+        top_hits = sorted(all_hits, key=len, reverse=True)[:3]
+        source_note = " (title match)" if title_only_match else ""
+        reasons.append(f"✓ {cap_name}: matched '{top_hits[0]}'{source_note}" +
+                      (f" + {len(all_hits)-1} more" if len(all_hits) > 1 else ""))
 
     # Now add SaaS score — but ONLY if at least one core capability cluster matched
     if saas_hits and clusters_matched >= 1:
@@ -1142,7 +1149,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     signals   = [o for o in opps if o.source == "Congress.gov"]
     events    = [o for o in opps if o.source == "Events Intelligence"]
 
-    low_fit = [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0 and any(r.startswith("✓") for r in o.score_reasons)]
+    low_fit = [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0]
     stats = [
         ("Total", len(non_events)),
         ("🟢 Strong", len(tiers["strong"])),
@@ -1191,7 +1198,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
   {build_section("🔵 Possible Fit — Scan Manually", [o for o in tiers["possible"] if o.source != "Events Intelligence"])}
-  {build_section("⚪ Low Fit — Weak Signal (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and any(r.startswith("✓") for r in o.score_reasons)])}
+  {build_section("⚪ Low Fit — Any Keyword Match (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0])}
   {build_section("🏆 Award Intel (Recent Contract Wins)", usa_intel[:8])}
   {build_competitor_section(competitor_items or [], growth_items=growth_items or [])}
   {build_funding_section(funding_items or [])}
