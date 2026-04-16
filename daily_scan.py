@@ -480,7 +480,7 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 def fetch_sam_gov() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
-    from_date = (today - timedelta(days=7)).strftime("%m/%d/%Y")
+    from_date = (today - timedelta(days=10)).strftime("%m/%d/%Y")
     to_date = today.strftime("%m/%d/%Y")
 
     notice_types = {"r": "RFI", "s": "Sources Sought", "i": "Industry Day", "p": "Pre-Solicitation"}
@@ -560,7 +560,7 @@ def fetch_sam_gov() -> list[Opportunity]:
             resp = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
                 params={"api_key": SAM_API_KEY, "keywords": kw,
-                        "postedFrom": (today - timedelta(days=7)).strftime("%m/%d/%Y"),
+                        "postedFrom": (today - timedelta(days=10)).strftime("%m/%d/%Y"),
                         "postedTo": (today + timedelta(days=60)).strftime("%m/%d/%Y"),
                         "noticetype": "i", "limit": 25},
                 headers=HEADERS, timeout=30
@@ -597,7 +597,7 @@ def fetch_federal_register() -> list[Opportunity]:
     results = []
     today = datetime.utcnow()
     # 30-day window — Federal Register RFIs have longer comment periods
-    since = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    since = (today - timedelta(days=10)).strftime("%Y-%m-%d")
 
     # Short targeted terms — Federal Register search matches title/abstract
     search_terms = [
@@ -1127,7 +1127,8 @@ def build_news_section(news_items: list) -> str:
 
 def build_html_email(opps: list[Opportunity], run_date: str,
                      source_counts: dict, news_items: list = None,
-                     competitor_items: list = None, growth_items: list = None) -> str:
+                     competitor_items: list = None, growth_items: list = None,
+                     funding_items: list = None) -> str:
     # Exclude events from solicitation tiers so stats bar reflects actual RFI/RFP counts
     non_events = [o for o in opps if o.source != "Events Intelligence"]
     tiers = {
@@ -1193,6 +1194,7 @@ def build_html_email(opps: list[Opportunity], run_date: str,
   {build_section("⚪ Low Fit — Weak Signal (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and any(r.startswith("✓") for r in o.score_reasons)])}
   {build_section("🏆 Award Intel (Recent Contract Wins)", usa_intel[:8])}
   {build_competitor_section(competitor_items or [], growth_items=growth_items or [])}
+  {build_funding_section(funding_items or [])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences to Attend", sorted(events, key=lambda x: x.score, reverse=True))}
 
@@ -1625,6 +1627,213 @@ def fetch_competitor_intel() -> list[dict]:
     return deduped[:20]
 
 
+def fetch_federal_funding() -> list[dict]:
+    """
+    Searches for federal funding opportunities relevant to Peregrine's customers
+    over the past 10 days. Sources:
+      - grants.gov SEARCH API (free, no key)
+      - Federal Register grant/funding notices
+    Looks for grants to law enforcement, public safety, corrections agencies
+    that signal budget available to buy technology like Peregrine.
+    """
+    today = datetime.utcnow()
+    since_dt = today - timedelta(days=10)
+    since_str = since_dt.strftime("%Y-%m-%d")
+    funding_items = []
+    seen_ids = set()
+
+    # ── grants.gov API ────────────────────────────────────────────────────────
+    # Free public API, no key required
+    # https://www.grants.gov/web/grants/s2s/applicant-web-services.html
+    grants_keywords = [
+        "law enforcement", "public safety", "police", "crime",
+        "criminal justice", "corrections", "community supervision",
+        "data analytics", "technology", "violence reduction",
+        "reentry", "recidivism", "gunshot", "gun violence",
+        "investigative", "surveillance", "intelligence",
+    ]
+
+    for kw in grants_keywords[:8]:  # limit API calls
+        try:
+            payload = {
+                "keyword": kw,
+                "oppStatuses": "posted",
+                "rows": 10,
+                "sortBy": "openDate|desc",
+            }
+            resp = requests.post(
+                "https://apply07.grants.gov/grantsws/rest/opportunities/search/",
+                json=payload,
+                headers={"Content-Type": "application/json",
+                         "User-Agent": "PeregrineScanner/2.0"},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                print(f"[Funding/grants.gov] HTTP {resp.status_code} for '{kw}'")
+                continue
+
+            data = resp.json()
+            opps = data.get("oppHits", [])
+
+            for opp in opps:
+                opp_id = str(opp.get("id", ""))
+                if opp_id in seen_ids:
+                    continue
+
+                open_date = opp.get("openDate", "") or ""
+                close_date = opp.get("closeDate", "") or ""
+
+                # Only include if opened in last 10 days
+                if open_date:
+                    try:
+                        od = datetime.strptime(open_date[:10], "%m/%d/%Y")
+                        if od < since_dt:
+                            continue
+                    except Exception:
+                        pass
+
+                title = opp.get("title", "") or ""
+                agency = opp.get("agencyName", "") or ""
+                synopsis = opp.get("synopsis", "") or ""
+                opp_number = opp.get("number", "") or ""
+                url = f"https://www.grants.gov/search-results-detail/{opp_id}" if opp_id else "https://www.grants.gov"
+
+                seen_ids.add(opp_id)
+                funding_items.append({
+                    "type": "Grant",
+                    "title": title,
+                    "agency": agency,
+                    "number": opp_number,
+                    "open_date": open_date,
+                    "close_date": close_date,
+                    "summary": synopsis[:300] if synopsis else f"Federal grant opportunity: {title}",
+                    "url": clean_url(url, "https://www.grants.gov"),
+                    "source": "grants.gov",
+                    "relevance": kw,
+                })
+
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[Funding/grants.gov] Error for '{kw}': {e}")
+
+    # ── Federal Register — grant/funding notices ──────────────────────────────
+    fr_funding_terms = [
+        "solicitation law enforcement technology",
+        "notice of funding law enforcement",
+        "grant public safety technology",
+        "notice of funding corrections",
+        "bja funding opportunity",
+        "cops grant technology",
+        "ojp solicitation data",
+    ]
+
+    for term in fr_funding_terms:
+        try:
+            url_params = (
+                f"conditions[term]={requests.utils.quote(term)}"
+                f"&conditions[publication_date][gte]={since_str}"
+                f"&conditions[type][]=NOTICE"
+                f"&per_page=5&order=newest"
+                f"&fields[]=document_number&fields[]=title&fields[]=abstract"
+                f"&fields[]=publication_date&fields[]=agencies&fields[]=html_url"
+            )
+            resp = requests.get(
+                f"https://www.federalregister.gov/api/v1/documents.json?{url_params}",
+                headers={"User-Agent": HEADERS["User-Agent"]},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                continue
+
+            docs = resp.json().get("results", [])
+            for doc in docs:
+                doc_id = doc.get("document_number", "")
+                if doc_id in seen_ids:
+                    continue
+
+                title = doc.get("title", "") or ""
+                abstract = doc.get("abstract", "") or ""
+                combined = f"{title} {abstract}".lower()
+
+                # Must signal actual funding
+                funding_signals = [
+                    "grant", "funding", "solicitation", "notice of funding",
+                    "cooperative agreement", "award", "appropriation",
+                ]
+                if not any(s in combined for s in funding_signals):
+                    continue
+
+                seen_ids.add(doc_id)
+                agencies = ", ".join(
+                    a.get("name", "") for a in doc.get("agencies", []) if a.get("name")
+                )
+                pub_date = doc.get("publication_date", "")
+                url = doc.get("html_url", f"https://www.federalregister.gov/documents/{doc_id}")
+
+                funding_items.append({
+                    "type": "Federal Register",
+                    "title": title,
+                    "agency": agencies or "Federal Agency",
+                    "number": doc_id,
+                    "open_date": pub_date,
+                    "close_date": "",
+                    "summary": abstract[:300],
+                    "url": clean_url(url, "https://www.federalregister.gov"),
+                    "source": "Federal Register",
+                    "relevance": term,
+                })
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[Funding/FederalRegister] Error for '{term}': {e}")
+
+    # Deduplicate by title similarity and sort by open date descending
+    seen_titles = set()
+    deduped = []
+    for item in funding_items:
+        key = item["title"][:60].lower()
+        if key not in seen_titles:
+            seen_titles.add(key)
+            deduped.append(item)
+
+    print(f"[Federal Funding] {len(deduped)} funding opportunities found (last 10 days)")
+    return sorted(deduped, key=lambda x: x.get("open_date", ""), reverse=True)[:20]
+
+
+def build_funding_section(funding_items: list) -> str:
+    """Render federal funding opportunities as a clean section."""
+    if not funding_items:
+        return """
+        <div style="margin:20px 0 6px">
+          <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">💰 Federal Funding Opportunities</h2>
+          <p style="color:#aaa;font-size:13px;font-style:italic">No new relevant funding opportunities in the last 10 days.</p>
+        </div>"""
+
+    rows = ""
+    for item in funding_items[:15]:
+        badge_color = "#27ae60" if item["type"] == "Grant" else "#8b0000"
+        close_html = f' &nbsp;·&nbsp; <strong>Closes:</strong> {item["close_date"]}' if item.get("close_date") else ""
+        link = ('<a href="' + item["url"] + '" style="font-weight:700;font-size:14px;color:#0057b8;text-decoration:none;">' + item["title"][:100] + '</a>') if item.get("url") else ('<span style="font-weight:700;font-size:14px;color:#333;">' + item["title"][:100] + '</span>')
+        summary = item.get("summary", "")[:250]
+
+        rows += f"""
+        <div style="border:1px solid #e8e8e8;border-radius:6px;padding:12px;margin-bottom:10px;background:#fff;">
+          <div style="margin-bottom:6px;">
+            <span style="background:{badge_color};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;">{item["type"]}</span>
+            <span style="font-size:11px;color:#888;margin-left:8px;">{item["source"]} · {item.get("open_date","")[:10]}</span>
+          </div>
+          <div style="margin-bottom:4px;">{link}</div>
+          <div style="font-size:12px;color:#666;margin-bottom:4px;">🏛 {item["agency"][:80]}{close_html}</div>
+          {f'<div style="font-size:12px;color:#555;line-height:1.4;">{summary}</div>' if summary else ''}
+        </div>"""
+
+    return f"""
+    <div style="margin:20px 0 6px">
+      <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">💰 Federal Funding Opportunities — Last 10 Days ({len(funding_items)})</h2>
+      <p style="font-size:12px;color:#888;margin:0 0 10px;">Grants and funding notices for law enforcement, public safety, and corrections agencies — Peregrine's buyer base.</p>
+      {rows}
+    </div>"""
+
+
 def fetch_growth_news() -> list[dict]:
     """
     When no competitor news is available, pull broader federal market signals
@@ -1917,8 +2126,18 @@ def main():
         except Exception as e:
             print(f"[Growth News] Error: {e}")
 
+    # Fetch federal funding opportunities (always runs, 10-day window)
+    print("\n[Federal Funding] Searching grants.gov and Federal Register...")
+    try:
+        funding_items = fetch_federal_funding()
+        source_counts["Federal Funding"] = len(funding_items)
+    except Exception as e:
+        print(f"[Federal Funding] Error: {e}")
+        funding_items = []
+        source_counts["Federal Funding"] = 0
+
     # Build and send
-    html = build_html_email(ranked, run_date, source_counts, news_items=news_items, competitor_items=competitor_items, growth_items=growth_items)
+    html = build_html_email(ranked, run_date, source_counts, news_items=news_items, competitor_items=competitor_items, growth_items=growth_items, funding_items=funding_items)
     send_email(html, subject)
 
     # Save local copy
