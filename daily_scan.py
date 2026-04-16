@@ -1219,10 +1219,36 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     # Separate solicitations from award intel — awards are intel only, not active opps
     non_events = [o for o in opps if o.source not in ("Events Intelligence", "USASpending.gov")]
     usa_intel  = [o for o in opps if o.source == "USASpending.gov"]
+    # Build tiers — strictly exclusive so nothing appears in two sections.
+    # An opp belongs to exactly one tier: the highest it qualifies for.
+    # Dedup within each tier by notice_id first, then by title similarity.
+    def _dedup(opps_list):
+        seen = set()
+        out = []
+        for o in opps_list:
+            key = o.notice_id or o.title[:60].lower()
+            if key not in seen:
+                seen.add(key)
+                out.append(o)
+        return out
+
+    strong_ids   = {o.notice_id or o.title[:60].lower()
+                    for o in non_events if "Strong" in o.tier}
+    good_ids     = {o.notice_id or o.title[:60].lower()
+                    for o in non_events if "Good" in o.tier}
+
     tiers = {
-        "strong":   [o for o in non_events if "Strong" in o.tier],
-        "good":     [o for o in non_events if "Good" in o.tier],
-        "possible": [o for o in non_events if "Possible" in o.tier],
+        # Strong Fit — top tier only
+        "strong":   _dedup([o for o in non_events if "Strong" in o.tier]),
+        # Good Fit — exclude anything already in Strong
+        "good":     _dedup([o for o in non_events
+                            if "Good" in o.tier
+                            and (o.notice_id or o.title[:60].lower()) not in strong_ids]),
+        # Possible Fit — exclude anything already in Strong or Good
+        "possible": _dedup([o for o in non_events
+                            if "Possible" in o.tier
+                            and (o.notice_id or o.title[:60].lower()) not in strong_ids
+                            and (o.notice_id or o.title[:60].lower()) not in good_ids]),
     }
     ind_days  = [o for o in opps if o.opp_type == "Industry Day"]
     fr_rfis   = [o for o in opps if o.source == "Federal Register"]
