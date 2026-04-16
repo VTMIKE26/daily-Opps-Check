@@ -1615,6 +1615,67 @@ def fetch_competitor_intel() -> list[dict]:
         except Exception as e:
             print(f"[CompetitorIntel] {feed['source']}: {e}")
 
+    # ── Palantir recompete signals from USASpending ─────────────────────────
+    # Find active Palantir contracts that are expiring within 12 months
+    palantir_recompetes = []
+    try:
+        today = datetime.utcnow()
+        # Contracts ending within next 12 months
+        end_soon = (today + timedelta(days=365)).strftime("%Y-%m-%d")
+        end_min  = today.strftime("%Y-%m-%d")
+        payload = {
+            "subawards": False, "limit": 10, "page": 1,
+            "filters": {
+                "keywords": ["palantir"],
+                "award_type_codes": ["A", "B", "C", "D"],
+                "time_period": [{"start_date": "2020-01-01", "end_date": end_soon}],
+            },
+            "fields": ["Award ID", "Recipient Name", "Start Date", "End Date",
+                       "Award Amount", "Awarding Agency", "Awarding Sub Agency", "Description"],
+        }
+        resp = requests.post(
+            "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+            json=payload,
+            headers={**HEADERS, "Content-Type": "application/json"},
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            awards = resp.json().get("results", [])
+            for award in awards:
+                end_date_str = award.get("End Date", "") or ""
+                if not end_date_str:
+                    continue
+                try:
+                    end_dt = datetime.strptime(end_date_str[:10], "%Y-%m-%d")
+                    days_left = (end_dt - today).days
+                    if days_left < 0 or days_left > 365:
+                        continue
+                    urgency = "🔴 Expires < 90 days" if days_left < 90 else "🟡 Expires < 180 days" if days_left < 180 else "🟢 Expires < 1 year"
+                    agency = award.get("Awarding Agency", "")
+                    sub = award.get("Awarding Sub Agency", "")
+                    amount = award.get("Award Amount", 0) or 0
+                    desc = (award.get("Description", "") or "")[:150]
+                    award_id = award.get("Award ID", "")
+                    palantir_recompetes.append({
+                        "competitor": "Palantir — Recompete Alert",
+                        "title": f"{urgency} | Palantir contract @ {agency} ({sub}) — ${amount:,.0f}",
+                        "url": clean_url(f"https://www.usaspending.gov/award/{award_id}/", "https://www.usaspending.gov"),
+                        "source": "USASpending.gov",
+                        "date": end_date_str[:10],
+                        "summary": f"Contract ends {end_date_str[:10]} ({days_left} days). {desc}",
+                        "is_recompete": True,
+                        "days_left": days_left,
+                        "urgency": urgency,
+                    })
+                except Exception:
+                    continue
+        print(f"[Palantir Recompetes] {len(palantir_recompetes)} expiring contracts found")
+    except Exception as e:
+        print(f"[Palantir Recompetes] Error: {e}")
+
+    # Merge recompetes into output (they'll render in their own subsection)
+    items_out.extend(palantir_recompetes)
+
     # Sort by competitor name, then deduplicate same story from multiple feeds
     seen_story_titles = set()
     deduped = []
@@ -1623,8 +1684,8 @@ def fetch_competitor_intel() -> list[dict]:
             seen_story_titles.add(item["title"])
             deduped.append(item)
 
-    print(f"[Competitor Intel] {len(deduped)} stories found across {len(COMPETITORS)} competitors")
-    return deduped[:20]
+    print(f"[Competitor Intel] {len(deduped)} total items (news + recompetes)")
+    return deduped[:25]
 
 
 def fetch_federal_funding() -> list[dict]:
@@ -1959,33 +2020,68 @@ def build_competitor_section(intel_items: list, growth_items: list = None) -> st
         for comp in item["competitor"].split(", "):
             grouped[comp.strip()].append(item)
 
-    rows = ""
-    for comp_name in sorted(grouped.keys()):
-        stories = grouped[comp_name][:3]  # max 3 per competitor
-        story_html = ""
-        for s in stories:
-            link = ('<a href="' + s["url"] + '" style="color:#0057b8;text-decoration:none;font-weight:600;">' + s["title"][:90] + '</a>') if s.get("url") else ('<span style="font-weight:600;color:#333;">' + s["title"][:90] + '</span>')
-            summary = s.get("summary", "")[:200]
-            story_html += f"""
-            <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #f0f0f0;">
-              <div style="font-size:13px;">{link}</div>
-              <div style="font-size:11px;color:#888;margin-top:2px;">{s['source']} · {s['date']}</div>
-              {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
-            </div>"""
+    # Split recompetes from news stories
+    recompetes = sorted(
+        [i for i in intel_items if i.get("is_recompete")],
+        key=lambda x: x.get("days_left", 999)
+    )
+    news_stories = [i for i in intel_items if not i.get("is_recompete")]
 
-        rows += f"""
-        <div style="margin-bottom:14px;">
-          <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">
-            ⚔️ {comp_name}
+    # ── Palantir recompete section ────────────────────────────────────────────
+    recompete_html = ""
+    if recompetes:
+        rc_rows = ""
+        for rc in recompetes[:8]:
+            link = ('<a href="' + rc["url"] + '" style="font-weight:700;color:#c0392b;text-decoration:none;">' + rc["title"][:120] + '</a>') if rc.get("url") else ('<span style="font-weight:700;color:#c0392b;">' + rc["title"][:120] + '</span>')
+            rc_rows += f"""
+            <div style="border-left:3px solid #c0392b;padding:8px 10px;margin-bottom:8px;background:#fff9f9;border-radius:0 4px 4px 0;">
+              <div style="font-size:13px;">{link}</div>
+              <div style="font-size:11px;color:#888;margin-top:2px;">Expires: {rc['date']} · {rc['source']}</div>
+              {f'<div style="font-size:12px;color:#555;margin-top:3px;">{rc.get("summary","")[:200]}</div>' if rc.get("summary") else ''}
+            </div>"""
+        recompete_html = f"""
+        <div style="margin-bottom:16px;">
+          <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
+            🎯 Palantir Recompete Opportunities ({len(recompetes)} expiring contracts)
           </div>
-          {story_html}
+          <p style="font-size:12px;color:#666;margin:0 0 8px;">Active Palantir contracts expiring within 12 months — displacement opportunities for Peregrine.</p>
+          {rc_rows}
         </div>"""
 
+    # ── News stories by competitor ────────────────────────────────────────────
+    news_rows = ""
+    if news_stories:
+        from collections import defaultdict
+        grouped_news = defaultdict(list)
+        for item in news_stories:
+            for comp in item["competitor"].split(", "):
+                grouped_news[comp.strip()].append(item)
+
+        for comp_name in sorted(grouped_news.keys()):
+            stories = grouped_news[comp_name][:3]
+            story_html = ""
+            for s in stories:
+                link = ('<a href="' + s["url"] + '" style="color:#0057b8;text-decoration:none;font-weight:600;">' + s["title"][:90] + '</a>') if s.get("url") else ('<span style="font-weight:600;color:#333;">' + s["title"][:90] + '</span>')
+                summary = s.get("summary", "")[:200]
+                story_html += f"""
+                <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #f0f0f0;">
+                  <div style="font-size:13px;">{link}</div>
+                  <div style="font-size:11px;color:#888;margin-top:2px;">{s['source']} · {s['date']}</div>
+                  {f'<div style="font-size:12px;color:#555;margin-top:2px;">{summary}</div>' if summary else ''}
+                </div>"""
+            news_rows += f"""
+            <div style="margin-bottom:14px;">
+              <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">⚔️ {comp_name}</div>
+              {story_html}
+            </div>"""
+
+    total = len(recompetes) + len(news_stories)
     return f"""
     <div style="margin:20px 0 6px">
-      <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">🔎 Competitor Intelligence ({len(intel_items)} stories)</h2>
+      <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">🔎 Competitor Intelligence ({total} signals)</h2>
       <p style="font-size:12px;color:#888;margin:0 0 12px;">Monitoring: {", ".join(c["name"] for c in COMPETITORS)}</p>
-      {rows}
+      {recompete_html}
+      {news_rows if news_rows else '<p style="color:#aaa;font-size:13px;font-style:italic">No competitor news stories today.</p>'}
     </div>"""
 
 
