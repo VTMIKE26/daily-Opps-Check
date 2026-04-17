@@ -2,13 +2,16 @@ name: Peregrine Daily Federal Scanner
 
 on:
   schedule:
-    # 7:00 AM EST (UTC-5) = 12:00 UTC  — runs year-round at 12:00 UTC
-    # Note: GitHub Actions cron uses UTC. EST = UTC-5, EDT = UTC-4.
-    # This fires at 7am EST (winter) and 8am EDT (summer).
-    # To always fire at exactly 7am ET, you would need two cron entries.
-    # For simplicity we use 12:00 UTC which delivers at 7am EST Nov-Mar.
+    # PRIMARY: 7:00 AM EST = 12:00 UTC (fires at 7am EST / 8am EDT)
     - cron: '0 12 * * 1-5'
-  workflow_dispatch:
+    # BACKUP: 7:15 AM EST = 12:15 UTC — catches GitHub scheduler delays
+    - cron: '15 12 * * 1-5'
+  workflow_dispatch:  # Manual trigger from GitHub Actions UI
+
+# Prevent duplicate runs if both crons fire close together
+concurrency:
+  group: daily-scanner-${{ github.event.schedule || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   daily-scan:
@@ -55,11 +58,11 @@ jobs:
                      "Content-Type": "application/json"},
             json={
               "personalizations": [{"to": [{"email": "mike.kelly@peregrine.io"}],
-                                    "subject": "⚠️ Peregrine Scanner Failed"}],
+                                    "subject": "Peregrine Scanner Failed Today"}],
               "from": {"email": "mikefkelly26@gmail.com",
                        "name": "Peregrine Federal Scanner"},
               "content": [{"type": "text/plain",
-                           "value": "The daily scanner failed. Check GitHub Actions logs."}],
+                           "value": "The daily scanner failed. Check GitHub Actions logs at https://github.com/VTMIKE26/daily-Opps-Check/actions"}],
             }
           )
           PYEOF
