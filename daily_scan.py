@@ -1136,40 +1136,48 @@ def opp_card(o: Opportunity) -> str:
       {f'<a href="{o.url}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;padding:6px 14px;border-radius:5px;font-size:12px;font-weight:600;">View on Source →</a>' if o.url else '<span style="font-size:12px;color:#888;font-style:italic;">No link available</span>'}
     </div>"""
 
-def _possible_fits(non_events: list, tiers: dict) -> list:
+def _possible_fits(non_events: list, tiers: dict, shown: set = None) -> list:
     """
     Return items for the Possible Fit section.
-    Priority order:
-      1. Items scored as Possible Fit by the engine (score 1-14)
-      2. If none: top Low Fit items by score (highest score first)
-      3. If still none: any non-excluded item with at least one keyword in title
-    Always returns something if data exists — never an empty section.
+    Excludes anything already shown in Strong/Good tiers.
+    Priority:
+      1. Engine-scored Possible Fit (score 1-14) not already shown
+      2. Best Low Fit by score, not already shown
+      3. Title keyword matches as last resort, not already shown
     """
+    shown = shown or set()
+
+    def _k(o):
+        return (o.notice_id or o.title[:60].lower()).strip()
+
+    def _unseen(lst):
+        return [o for o in lst if _k(o) not in shown]
+
     # Primary: engine-scored Possible Fit
-    possible = [o for o in tiers.get("possible", []) if o.source != "Events Intelligence"]
+    possible = _unseen([o for o in tiers.get("possible", [])
+                        if o.source != "Events Intelligence"])
     if possible:
         return possible
 
-    # Fallback 1: best Low Fit items (have score > 0 but below threshold)
+    # Fallback 1: best Low Fit items not already shown
     low = sorted(
-        [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0],
+        _unseen([o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0]),
         key=lambda x: x.score, reverse=True
     )
     if low:
         return low[:10]
 
-    # Fallback 2: any item that hit at least one cluster keyword in its title
-    # (score may be 0 if penalties cancelled it, but title signal is real)
+    # Fallback 2: title keyword matches, not already shown
     TITLE_KEYWORDS = [
         "data", "analytics", "platform", "software", "intelligence",
         "modernization", "investigation", "law enforcement", "public safety",
         "corrections", "supervision", "cloud", "ai", "system", "information",
     ]
-    title_matches = [
+    title_matches = _unseen([
         o for o in non_events
         if o.tier not in ("⛔ Not a Fit", "⛔ Expired")
         and any(kw in o.title.lower() for kw in TITLE_KEYWORDS)
-    ]
+    ])
     return sorted(title_matches, key=lambda x: x.score, reverse=True)[:10]
 
 
@@ -1225,40 +1233,52 @@ def build_html_email(opps: list[Opportunity], run_date: str,
     # Build tiers — strictly exclusive so nothing appears in two sections.
     # An opp belongs to exactly one tier: the highest it qualifies for.
     # Dedup within each tier by notice_id first, then by title similarity.
+    def _key(o):
+        """Stable dedup key — prefer noticeId, fall back to title prefix."""
+        return (o.notice_id or o.title[:60].lower()).strip()
+
     def _dedup(opps_list):
         seen = set()
         out = []
         for o in opps_list:
-            key = o.notice_id or o.title[:60].lower()
-            if key not in seen:
-                seen.add(key)
+            k = _key(o)
+            if k not in seen:
+                seen.add(k)
                 out.append(o)
         return out
 
-    strong_ids   = {o.notice_id or o.title[:60].lower()
-                    for o in non_events if "Strong" in o.tier}
-    good_ids     = {o.notice_id or o.title[:60].lower()
-                    for o in non_events if "Good" in o.tier}
+    # Build each tier strictly — each opportunity appears in exactly ONE tier.
+    # We accumulate a global `shown` set and exclude from every lower tier.
+    shown = set()
+
+    strong_list = _dedup([o for o in non_events if "Strong" in o.tier])
+    shown.update(_key(o) for o in strong_list)
+
+    good_list = _dedup([o for o in non_events
+                        if "Good" in o.tier and _key(o) not in shown])
+    shown.update(_key(o) for o in good_list)
+
+    possible_list = _dedup([o for o in non_events
+                            if "Possible" in o.tier and _key(o) not in shown])
+    shown.update(_key(o) for o in possible_list)
+
+    low_fit_list = _dedup([o for o in non_events
+                           if o.tier == "⚪ Low Fit"
+                           and o.score > 0
+                           and _key(o) not in shown])
+    shown.update(_key(o) for o in low_fit_list)
 
     tiers = {
-        # Strong Fit — top tier only
-        "strong":   _dedup([o for o in non_events if "Strong" in o.tier]),
-        # Good Fit — exclude anything already in Strong
-        "good":     _dedup([o for o in non_events
-                            if "Good" in o.tier
-                            and (o.notice_id or o.title[:60].lower()) not in strong_ids]),
-        # Possible Fit — exclude anything already in Strong or Good
-        "possible": _dedup([o for o in non_events
-                            if "Possible" in o.tier
-                            and (o.notice_id or o.title[:60].lower()) not in strong_ids
-                            and (o.notice_id or o.title[:60].lower()) not in good_ids]),
+        "strong":   strong_list,
+        "good":     good_list,
+        "possible": possible_list,
     }
     ind_days  = [o for o in opps if o.opp_type == "Industry Day"]
     fr_rfis   = [o for o in opps if o.source == "Federal Register"]
     signals   = [o for o in opps if o.source == "Congress.gov"]
     events    = [o for o in opps if o.source == "Events Intelligence"]
 
-    low_fit = [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0]
+    low_fit = low_fit_list  # already deduped and excluded from higher tiers
     stats = [
         ("Total", len(non_events)),
         ("🟢 Strong", len(tiers["strong"])),
@@ -1306,8 +1326,8 @@ def build_html_email(opps: list[Opportunity], run_date: str,
 
   {build_section("🟢 Strong Fit — Act Now", [o for o in tiers["strong"] if o.source != "Events Intelligence"])}
   {build_section("🟡 Good Fit — Review Today", [o for o in tiers["good"] if o.source != "Events Intelligence"])}
-  {build_section("🔵 Possible Fit — Review These", _possible_fits(non_events, tiers))}
-  {build_section("⚪ Low Fit — Any Keyword Match (Review Manually)", [o for o in non_events if o.tier == "⚪ Low Fit" and o.score > 0])}
+  {build_section("🔵 Possible Fit — Review These", _possible_fits(non_events, tiers, shown))}
+  {build_section("⚪ Low Fit — Any Keyword Match (Review Manually)", low_fit_list)}
   {build_award_intel_section(usa_intel[:5])}
   {build_competitor_section(competitor_items or [], growth_items=growth_items or [])}
   {build_funding_section(funding_items or [])}
