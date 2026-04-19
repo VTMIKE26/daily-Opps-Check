@@ -231,30 +231,32 @@ CAPABILITY_CLUSTERS = [
         ],
     ),
     (
-        # Peregrine's primary market — LE agencies, public safety, fusion centers
+        # Public Safety & Law Enforcement — must imply SOFTWARE/DATA need,
+        # not just any law enforcement adjacent work. "police" alone matches
+        # vehicle purchases, uniforms, etc. Require compound terms that signal
+        # a technology or data platform requirement.
         "Public Safety & Law Enforcement", 20,
         [
-            # Direct market terms
-            "law enforcement", "public safety",
-            "police department", "police", "sheriff",
-            "criminal justice", "criminal investigation",
-            # Peregrine-specific integrations
-            "nibin", "etrace", "crime gun", "ballistic",
+            # Specific Peregrine integrations (always relevant)
+            "nibin", "etrace", "crime gun", "ballistic intelligence",
             "cgic", "crime gun intelligence",
-            "records management system", "rms",
-            "computer-aided dispatch", "cad system",
-            "cad software", "dispatch system",
-            # Mission areas
-            "first responder", "violent crime",
-            "gang", "crime reduction",
-            "body camera", "evidence management",
-            "fusion center", "law enforcement analytics",
-            "policing platform", "public safety software",
-            "public safety platform", "public safety technology",
-            # Broader triggers
-            "justice", "corrections", "courts",
-            "prosecution", "investigation platform",
-            "crime", "incident management",
+            # Platform/system terms — imply software procurement
+            "records management system", "records management software",
+            "computer-aided dispatch", "computer aided dispatch", "cad system", "cad software",
+            "law enforcement platform", "law enforcement software",
+            "law enforcement analytics", "law enforcement data",
+            "law enforcement technology", "law enforcement information",
+            "public safety platform", "public safety software",
+            "public safety technology", "public safety data",
+            "public safety analytics", "public safety system",
+            "policing platform", "policing software",
+            "fusion center", "fusion center platform",
+            "criminal justice platform", "criminal justice software",
+            "criminal justice information system", "criminal justice data",
+            "crime analytics", "crime data", "crime intelligence",
+            "evidence management system", "evidence management platform",
+            "investigation platform", "investigative software",
+            "body camera data", "body camera analytics",
         ],
     ),
     (
@@ -272,7 +274,8 @@ CAPABILITY_CLUSTERS = [
             "supervised release", "correctional",
             "offender tracking", "supervision software",
             "supervision system", "case management",
-            "supervision", "offender supervision",
+            "supervision platform", "supervision system", "supervision software",
+            "supervision analytics", "offender supervision",
         ],
     ),
     (
@@ -2324,19 +2327,25 @@ def main():
                 if 0 <= days <= 7:
                     urgent_deadlines.append(days)
 
-    # Build dynamic subject line
+    # Build dynamic subject line — useful preview, no red dot
+    # Include top opportunity title when available for richer inbox preview
+    top_title = ""
+    top_opps = [o for o in solicitations if "Strong" in o.tier or "Good" in o.tier]
+    if top_opps:
+        top_title = f" — {top_opps[0].title[:45].strip()}"
+
     if strong == 0 and good == 0:
-        subject = f"🦅 Peregrine Daily | No strong matches today — {possible} possible | {run_date}"
+        subject = f"🦅 Peregrine Intel | {possible} Possible Fits | {run_date}"
     elif urgent_deadlines:
         soonest = min(urgent_deadlines)
-        urgent_label = "today" if soonest == 0 else f"in {soonest}d"
-        subject = f"🔴 Peregrine Daily | {strong} Strong · {good} Good — deadline {urgent_label} | {run_date}"
+        urgent_label = "Today" if soonest == 0 else f"{soonest}d left"
+        subject = f"⚡ Peregrine Intel | {strong} Strong · {good} Good | {urgent_label}{top_title} | {run_date}"
     elif strong >= 5:
-        subject = f"🚀 Peregrine Daily | {strong} Strong · {good} Good Fits | {run_date}"
+        subject = f"🚀 Peregrine Intel | {strong} Strong · {good} Good Fits{top_title} | {run_date}"
     elif strong >= 1:
-        subject = f"🦅 Peregrine Daily | {strong} Strong · {good} Good Fits | {run_date}"
+        subject = f"🦅 Peregrine Intel | {strong} Strong · {good} Good{top_title} | {run_date}"
     else:
-        subject = f"🦅 Peregrine Daily | {good} Good Fits · {possible} Possible | {run_date}"
+        subject = f"🦅 Peregrine Intel | {good} Good · {possible} Possible{top_title} | {run_date}"
 
     # Fetch industry news separately (returns dicts, not Opportunities)
     print("\n[Industry News] Fetching relevant news...")
