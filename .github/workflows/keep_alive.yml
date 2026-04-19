@@ -1,13 +1,14 @@
 name: Keep Workflows Active
 
-# GitHub suspends scheduled workflows on repos with no activity in 60 days.
-# This workflow commits a timestamp file daily to prevent that suspension.
-# It runs at 6:50 AM EST (10 min before the scanner) to ensure the repo
-# is "active" when the scanner fires.
+# GitHub DISABLES scheduled workflows after 60 days of repo inactivity.
+# This workflow commits a timestamp every weekday morning at 6:50 AM EST
+# BEFORE the scanner fires, guaranteeing the repo stays "active".
+# Without this, your scanner will silently stop running after ~2 months.
 
 on:
   schedule:
-    - cron: '50 11 * * 1-5'  # 6:50 AM EST = 11:50 UTC
+    - cron: '50 11 * * 1-5'   # 6:50 AM EDT
+    - cron: '50 10 * * 1-5'   # 6:50 AM EST (extra safety)
   workflow_dispatch:
 
 jobs:
@@ -21,11 +22,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Touch activity file
+      - name: Update activity timestamp
         run: |
-          echo "Last keep-alive: $(date -u '+%Y-%m-%d %H:%M UTC')" > .github/last_active.txt
-          git config user.name  "Peregrine Scanner Bot"
-          git config user.email "scanner@peregrine.io"
+          mkdir -p .github
+          echo "$(date -u '+%Y-%m-%d %H:%M UTC')" > .github/last_active.txt
+          git config user.name  "Peregrine Bot"
+          git config user.email "actions@github.com"
           git add .github/last_active.txt
-          git diff --staged --quiet || git commit -m "chore: keep workflows active [skip ci]"
-          git push
+          git diff --staged --quiet && echo "No changes" || \
+            (git commit -m "chore: keep-alive $(date -u '+%Y-%m-%d') [skip ci]" && git push)
