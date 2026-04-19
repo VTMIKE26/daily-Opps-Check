@@ -864,132 +864,33 @@ def fetch_usaspending_intel() -> list[Opportunity]:
 
 # ---------------------------------------------------------------------------
 # SOURCE: DOJ & DHS TARGETED SEARCHES
-# ---------------------------------------------------------------------------
-# DOJ sub-agencies relevant to Peregrine:
-#   ATF, FBI, DEA, USMS, BOP, EOUSA, OJP, COPS, CSOSA
-# DHS sub-agencies relevant to Peregrine:
-#   HSI, ICE, CBP, USSS, TSA, CISA, FEMA, USCIS, Coast Guard
-#
-# Strategy:
-#   1. SAM.gov title search scoped to DOJ/DHS department names
-#   2. DHS APFS forecast scrape for pipeline intelligence
-#   3. DOJ OJP grants feed for technology grants to LE agencies
+# Run capability title searches scoped to DOJ and DHS specifically.
+# The general SAM fetch returns max 100 results per keyword — by scoping to
+# DOJ/DHS we get the full DOJ/DHS result set for each term, not diluted by
+# all other agencies. Uses deptname= param (partial match, case insensitive).
 # ---------------------------------------------------------------------------
 
-DOJ_TITLE_TERMS = [
-    "data analytics", "data integration", "data platform",
-    "analytics platform", "analytics solution",
-    "IT modernization", "platform modernization",
-    "records management", "case management",
-    "investigative platform", "intelligence platform",
-    "federated search", "information sharing",
-    "artificial intelligence", "machine learning",
-    "law enforcement analytics", "crime analytics",
-    "community supervision", "offender management",
-    "entity resolution", "data unification",
-]
-
-DHS_TITLE_TERMS = [
-    "data analytics", "data integration", "data platform",
-    "analytics platform", "IT modernization",
-    "intelligence platform", "investigative",
-    "information sharing", "federated search",
-    "artificial intelligence", "machine learning",
-    "law enforcement analytics", "surveillance analytics",
-    "entity resolution", "identity resolution",
-    "records management", "case management",
-    "data unification", "operational intelligence",
-]
-
-# DOJ department/bureau names as they appear in SAM.gov fullParentPathName
-DOJ_DEPT_NAMES = [
-    "DEPT OF JUSTICE", "DEPARTMENT OF JUSTICE",
-    "BUREAU OF ALCOHOL", "ATF",
-    "FEDERAL BUREAU OF INVESTIGATION", "FBI",
-    "DRUG ENFORCEMENT", "DEA",
-    "BUREAU OF PRISONS", "BOP",
-    "U.S. MARSHALS", "MARSHALS",
-    "OFFICE OF JUSTICE PROGRAMS", "OJP",
-    "COPS OFFICE", "CSOSA",
-    "EXECUTIVE OFFICE FOR UNITED STATES ATTORNEYS",
-]
-
-DHS_DEPT_NAMES = [
-    "DEPT OF HOMELAND SECURITY", "DEPARTMENT OF HOMELAND SECURITY",
-    "HOMELAND SECURITY INVESTIGATIONS", "HSI",
-    "IMMIGRATION AND CUSTOMS", "ICE",
-    "CUSTOMS AND BORDER PROTECTION", "CBP",
-    "SECRET SERVICE", "USSS",
-    "TRANSPORTATION SECURITY", "TSA",
-    "CYBERSECURITY AND INFRASTRUCTURE", "CISA",
-    "FEDERAL EMERGENCY MANAGEMENT", "FEMA",
+# Capability terms most relevant to DOJ/DHS specifically
+DOJ_DHS_TERMS = [
+    "data analytics",       "data integration",     "data platform",
+    "analytics platform",   "analytics solution",   "data management",
+    "IT modernization",     "platform modernization","legacy modernization",
+    "investigative",        "intelligence platform", "crime analytics",
+    "records management",   "case management",       "information sharing",
+    "federated search",     "enterprise search",     "entity resolution",
+    "artificial intelligence","machine learning",    "AI platform",
+    "community supervision","offender management",   "corrections",
+    "law enforcement analytics","public safety analytics",
+    "data unification",     "situational awareness", "fedramp",
 ]
 
 
-def fetch_doj_opportunities() -> list[Opportunity]:
+def fetch_agency_targeted(dept_short: str, deptname_filter: str) -> list[Opportunity]:
     """
-    Targeted DOJ opportunity search.
-    Two passes: title search across all DOJ (no dept filter needed since SAM
-    title search already narrows results), then filter returned items to those
-    from DOJ agencies. This catches ATF, FBI, DEA, BOP, OJP, CSOSA etc.
-    """
-    if not SAM_API_KEY:
-        return []
-
-    results  = []
-    seen_ids = set()
-    today    = datetime.utcnow()
-    to_date  = today.strftime("%m/%d/%Y")
-    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
-
-    def _add(item, source_label="DOJ"):
-        nid = item.get("noticeId") or item.get("id") or ""
-        if not nid or nid in seen_ids:
-            return
-        seen_ids.add(nid)
-        results.append(score_opportunity(Opportunity(
-            title         = item.get("title", "Untitled"),
-            notice_id     = nid,
-            agency        = item.get("fullParentPathName") or item.get("departmentName") or "DOJ",
-            posted_date   = item.get("postedDate", ""),
-            response_date = item.get("responseDeadLine", "TBD"),
-            description   = (item.get("description") or "")[:2000],
-            url           = clean_url(f"https://sam.gov/opp/{nid}/view", "https://sam.gov/search"),
-            opp_type      = item.get("type") or "Notice",
-            source        = "SAM.gov",
-            naics         = item.get("naicsCode", ""),
-        )))
-
-    for term in DOJ_TITLE_TERMS:
-        try:
-            r = requests.get(
-                "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "title": term,
-                        "postedFrom": from_90, "postedTo": to_date,
-                        "active": "Yes", "limit": 100,
-                        "deptname": "dept+of+justice"},
-                headers=HEADERS, timeout=30,
-            )
-            r.raise_for_status()
-            items = r.json().get("opportunitiesData", [])
-            new = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
-            if new:
-                print(f"[DOJ] title='{term}': {len(items)} fetched, {new} new")
-            for item in items:
-                _add(item)
-            time.sleep(0.25)
-        except Exception as e:
-            print(f"[DOJ] '{term}' error: {e}")
-
-    print(f"[DOJ] Total: {len(results)} opportunities")
-    return results
-
-
-def fetch_dhs_opportunities() -> list[Opportunity]:
-    """
-    Targeted DHS opportunity search + APFS forecast pipeline intel.
-    SAM.gov title search scoped to DHS, plus scrape of the public APFS
-    forecast for upcoming DHS contracts in analytics/IT.
+    Title search scoped to a specific department via deptname= filter.
+    dept_short: label for logging (e.g. "DOJ", "DHS")
+    deptname_filter: partial dept name SAM.gov will match against
+                     (e.g. "justice", "homeland")
     """
     if not SAM_API_KEY:
         return []
@@ -1008,7 +909,7 @@ def fetch_dhs_opportunities() -> list[Opportunity]:
         results.append(score_opportunity(Opportunity(
             title         = item.get("title", "Untitled"),
             notice_id     = nid,
-            agency        = item.get("fullParentPathName") or item.get("departmentName") or "DHS",
+            agency        = item.get("fullParentPathName") or item.get("departmentName") or dept_short,
             posted_date   = item.get("postedDate", ""),
             response_date = item.get("responseDeadLine", "TBD"),
             description   = (item.get("description") or "")[:2000],
@@ -1018,78 +919,47 @@ def fetch_dhs_opportunities() -> list[Opportunity]:
             naics         = item.get("naicsCode", ""),
         )))
 
-    # SAM.gov title search scoped to DHS
-    for term in DHS_TITLE_TERMS:
+    total_new = 0
+    for term in DOJ_DHS_TERMS:
         try:
             r = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "title": term,
-                        "postedFrom": from_90, "postedTo": to_date,
-                        "active": "Yes", "limit": 100,
-                        "deptname": "dept+of+homeland+security"},
+                params={
+                    "api_key":    SAM_API_KEY,
+                    "title":      term,
+                    "deptname":   deptname_filter,   # partial dept name match
+                    "postedFrom": from_90,
+                    "postedTo":   to_date,
+                    "active":     "Yes",
+                    "limit":      100,
+                },
                 headers=HEADERS, timeout=30,
             )
             r.raise_for_status()
-            items = r.json().get("opportunitiesData", [])
-            new = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
+            data  = r.json()
+            items = data.get("opportunitiesData", [])
+            new   = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
             if new:
-                print(f"[DHS] title='{term}': {len(items)} fetched, {new} new")
+                total_new += new
+                print(f"[{dept_short}] title='{term}': {data.get('totalRecords',0)} total, {new} new")
             for item in items:
                 _add(item)
             time.sleep(0.25)
         except Exception as e:
-            print(f"[DHS] '{term}' error: {e}")
+            print(f"[{dept_short}] '{term}' error: {e}")
 
-    # DHS APFS Forecast — pipeline intelligence (upcoming, not yet on SAM.gov)
-    # Scrape the public forecast for IT/analytics related items
-    try:
-        apfs_keywords = [
-            "analytics", "data", "intelligence", "information technology",
-            "platform", "modernization", "investigation", "surveillance",
-        ]
-        for kw in apfs_keywords[:4]:  # limit scrape calls
-            r = requests.get(
-                "https://apfs-cloud.dhs.gov/forecast/",
-                params={"search": kw},
-                headers={"User-Agent": HEADERS["User-Agent"]},
-                timeout=15,
-            )
-            if r.status_code == 200 and "Requirements Title" in r.text:
-                # Parse simple HTML table
-                import re as _re
-                rows = _re.findall(r'<tr[^>]*>(.*?)</tr>', r.text, _re.DOTALL)
-                for row in rows[1:6]:  # skip header, max 5 per keyword
-                    cells = _re.findall(r'<td[^>]*>(.*?)</td>', row, _re.DOTALL)
-                    cells = [_re.sub(r'<[^>]+>', '', c).strip() for c in cells]
-                    if len(cells) >= 4:
-                        title = cells[3] if len(cells) > 3 else cells[0]
-                        if not title or title in seen_ids:
-                            continue
-                        seen_ids.add(title)
-                        apfs_id = cells[1] if len(cells) > 1 else ""
-                        url = clean_url(
-                            f"https://apfs-cloud.dhs.gov/record/{apfs_id}/public-print/" if apfs_id else "",
-                            "https://apfs-cloud.dhs.gov/forecast/"
-                        )
-                        opp = Opportunity(
-                            title         = f"[DHS FORECAST] {title[:120]}",
-                            notice_id     = f"APFS-{apfs_id or hash(title) % 10**8}",
-                            agency        = f"DHS / {cells[2] if len(cells) > 2 else 'Unknown Component'}",
-                            posted_date   = today.strftime("%Y-%m-%d"),
-                            response_date = "See APFS for solicitation date",
-                            description   = f"DHS pipeline opportunity. {' | '.join(cells[:6])}",
-                            url           = url,
-                            opp_type      = "DHS Forecast",
-                            source        = "DHS APFS",
-                            naics         = cells[6] if len(cells) > 6 else "",
-                        )
-                        results.append(score_opportunity(opp))
-            time.sleep(0.3)
-    except Exception as e:
-        print(f"[DHS APFS] Error: {e}")
-
-    print(f"[DHS] Total: {len(results)} opportunities (SAM + APFS)")
+    print(f"[{dept_short}] Total: {len(results)} opportunities ({total_new} unique from dept filter)")
     return results
+
+
+def fetch_doj_opportunities() -> list[Opportunity]:
+    """DOJ-scoped title search — ATF, FBI, DEA, BOP, OJP, CSOSA, USMS."""
+    return fetch_agency_targeted("DOJ", "justice")
+
+
+def fetch_dhs_opportunities() -> list[Opportunity]:
+    """DHS-scoped title search — HSI, ICE, CBP, USSS, TSA, CISA, FEMA."""
+    return fetch_agency_targeted("DHS", "homeland")
 
 
 # ---------------------------------------------------------------------------
