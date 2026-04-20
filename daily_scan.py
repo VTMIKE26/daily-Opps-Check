@@ -276,7 +276,9 @@ CAPABILITY_CLUSTERS = [
             "department of corrections",
             "recidivism", "offender data",
             "supervision platform", "smart21",
-            "supervised release", "correctional",
+            "supervised release",
+            "correctional software", "correctional platform",
+            "correctional data", "correctional analytics",
             "offender tracking", "supervision software",
             "supervision system", "case management",
             "supervision platform", "supervision system", "supervision software",
@@ -399,6 +401,11 @@ HARD_EXCLUSIONS = [
     # Physical goods procurement
     "purchase of supplies", "office supplies",
     "janitorial supplies", "cleaning supplies",
+    # Hardware devices — tablets, phones, computers
+    "tablets", "tablet procurement", "tablet purchase",
+    "mobile devices", "smartphones", "cell phones",
+    "laptops", "desktops", "workstations",
+    "printers", "copiers", "scanners",
     # Network / telecom / infrastructure — not software
     "vpn", "ethernet", "transport services", "network infrastructure",
     "telecommunications", "telecom services", "internet service provider",
@@ -406,6 +413,15 @@ HARD_EXCLUSIONS = [
     "wireless network", "cellular services", "satellite services",
     "bandwidth services", "circuit services", "wan services",
     "network connectivity", "connectivity services",
+    # Hardware support & maintenance agreements — not software
+    "maintenance agreement", "service agreement hardware",
+    "network server", "server maintenance", "server hardware",
+    "hardware support", "hardware maintenance agreement",
+    "pma maintenance", "preventive maintenance agreement",
+    "network equipment", "server equipment",
+    "storage hardware", "storage array",
+    "firewall hardware", "switch hardware", "router hardware",
+    "data center hardware", "rack hardware",
 ]
 
 # Penalty signals — mismatch indicators (reduce score but don't exclude)
@@ -1317,9 +1333,13 @@ def _possible_fits(non_events: list, tiers: dict, shown: set = None) -> list:
 
     # Fallback 2: title keyword matches, not already shown
     TITLE_KEYWORDS = [
-        "data", "analytics", "platform", "software", "intelligence",
-        "modernization", "investigation", "law enforcement", "public safety",
-        "corrections", "supervision", "cloud", "ai", "system", "information",
+        # Only words that genuinely imply a software/data/analytics need
+        "analytics", "platform", "software",
+        "intelligence platform", "data integration", "data analytics",
+        "modernization", "investigation platform", "law enforcement analytics",
+        "public safety platform", "corrections platform",
+        "federated search", "entity resolution",
+        "machine learning", "artificial intelligence",
     ]
     title_matches = _unseen([
         o for o in non_events
