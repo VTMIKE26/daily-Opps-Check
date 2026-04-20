@@ -2,17 +2,18 @@ name: Peregrine Daily Federal Scanner
 
 on:
   schedule:
-    # 7:00 AM EST = 12:00 UTC  |  7:00 AM EDT = 11:00 UTC
-    # Run both so it fires at 7am regardless of daylight saving time
-    - cron: '0 11 * * 1-5'   # 7:00 AM EDT (Mar-Nov)
-    - cron: '0 12 * * 1-5'   # 7:00 AM EST (Nov-Mar)
-    # Backup 15 min later in case GitHub scheduler is delayed
-    - cron: '15 12 * * 1-5'
-  workflow_dispatch:          # Always keep manual trigger
+    # 7:00 AM EST = 12:00 UTC (Nov-Mar)
+    # 7:00 AM EDT = 11:00 UTC (Mar-Nov)
+    # Run both so it fires at exactly 7am regardless of daylight saving
+    - cron: '0 11 * * 1-5'
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch:
 
-# Prevent duplicate sends if multiple crons fire close together
+# CRITICAL: prevents duplicate runs when both crons fire on the same day.
+# Same group name = only one run allowed at a time. The second cron that
+# fires will wait if the first is still running, or skip if already done.
 concurrency:
-  group: peregrine-scanner
+  group: peregrine-daily-scanner
   cancel-in-progress: false
 
 jobs:
