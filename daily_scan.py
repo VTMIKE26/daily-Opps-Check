@@ -303,17 +303,17 @@ CAPABILITY_CLUSTERS = [
             "artificial intelligence", "machine learning",
             "ai/ml", "ai platform", "ai solution",
             "ai system", "ai services",
-            "generative ai", "large language model", "llm",
+            # Space-padded to prevent substring matches like "regenerative" → "generative ai"
+            " generative ai", "generative ai ",
+            "large language model", "llm",
             "natural language processing", "nlp",
             "computer vision", "predictive model",
             "decision support", "decision support system",
             "automated analysis", "intelligent automation",
-            "algorithmic", "ai-powered",
+            "ai-powered", "ai-driven",
             "ai for law enforcement", "ai public safety",
             "responsible ai", "explainable ai",
             "ai governance", "ai analytics",
-            # Shorter triggers
-            "automation", "automated",
         ],
     ),
 ]
@@ -384,6 +384,16 @@ HARD_EXCLUSIONS = [
     # Training-only (not software training)
     "firearms training", "defensive tactics", "use of force training",
     "physical fitness", "k-9 training", "canine training",
+    # Equipment rental and physical goods
+    "equipment rental", "rental of equipment", "equipment lease",
+    "air compressor", "generator rental", "forklift rental",
+    "heavy equipment", "construction equipment",
+    "medical equipment", "laboratory equipment",
+    "audio visual equipment", "av equipment",
+    "office equipment rental",
+    # Physical goods procurement
+    "purchase of supplies", "office supplies",
+    "janitorial supplies", "cleaning supplies",
 ]
 
 # Penalty signals — mismatch indicators (reduce score but don't exclude)
@@ -426,7 +436,7 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
                 break
     # Score only against title + description + NAICS hints
     # Agency name intentionally excluded — an agency match alone is not a capability fit
-    text = f"{opp.title} {opp.description} {naics_hint}".lower()
+    text = f" {opp.title} {opp.description} {naics_hint} ".lower()  # padded for word-boundary phrase matching
     # Keep agency text separate for display only
     agency_text = opp.agency.lower()
     for excl in HARD_EXCLUSIONS:
