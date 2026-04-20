@@ -935,18 +935,17 @@ def fetch_usaspending_intel() -> list[Opportunity]:
 # ---------------------------------------------------------------------------
 
 # Capability terms most relevant to DOJ/DHS specifically
+# Targeted terms for DOJ/DHS agency-specific searches.
+# Kept SHORT to stay within SAM.gov 1,000 calls/day limit.
+# General broad terms (data analytics, IT modernization, etc.) are already
+# covered by fetch_sam_gov — these focus on agency-specific signals.
 DOJ_DHS_TERMS = [
-    "data analytics",       "data integration",     "data platform",
-    "analytics platform",   "analytics solution",   "data management",
-    "IT modernization",     "platform modernization","legacy modernization",
-    "investigative",        "intelligence platform", "crime analytics",
-    "records management",   "case management",       "information sharing",
-    "federated search",     "enterprise search",     "entity resolution",
-    "artificial intelligence","machine learning",    "AI platform",
-    "community supervision","offender management",   "corrections",
-    "law enforcement analytics","public safety analytics",
-    "data unification",     "situational awareness", "fedramp",
-]
+    "data analytics",        "data integration",
+    "investigative platform","intelligence platform",
+    "community supervision", "offender management",
+    "records management",    "IT modernization",
+    "artificial intelligence","digital evidence",
+]  # 10 terms × (1 parent + N sub-agencies) ≤ ~300 calls total
 
 
 def fetch_agency_targeted(dept_short: str, deptname_filter: str) -> list[Opportunity]:
@@ -985,32 +984,42 @@ def fetch_agency_targeted(dept_short: str, deptname_filter: str) -> list[Opportu
 
     total_new = 0
     for term in DOJ_DHS_TERMS:
-        try:
-            r = requests.get(
-                "https://api.sam.gov/opportunities/v2/search",
-                params={
-                    "api_key":          SAM_API_KEY,
-                    "title":            term,
-                    "organizationName": deptname_filter,  # replaces deprecated deptname
-                    "postedFrom":       from_90,
-                    "postedTo":         to_date,
-                    "active":           "Yes",
-                    "limit":            100,
-                },
-                headers=HEADERS, timeout=30,
-            )
-            r.raise_for_status()
-            data  = r.json()
-            items = data.get("opportunitiesData", [])
-            new   = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
-            if new:
-                total_new += new
-                print(f"[{dept_short}] title='{term}': {data.get('totalRecords',0)} total, {new} new")
-            for item in items:
-                _add(item)
-            time.sleep(0.25)
-        except Exception as e:
-            print(f"[{dept_short}] '{term}' error: {e}")
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    "https://api.sam.gov/opportunities/v2/search",
+                    params={
+                        "api_key":          SAM_API_KEY,
+                        "title":            term,
+                        "organizationName": deptname_filter,
+                        "postedFrom":       from_90,
+                        "postedTo":         to_date,
+                        "active":           "Yes",
+                        "limit":            100,
+                    },
+                    headers=HEADERS, timeout=30,
+                )
+                if r.status_code == 429:
+                    wait = 30 * (attempt + 1)
+                    print(f"[{dept_short}] Rate limited on '{term}' — waiting {wait}s")
+                    time.sleep(wait)
+                    continue
+                r.raise_for_status()
+                data  = r.json()
+                items = data.get("opportunitiesData", [])
+                new   = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
+                if new:
+                    total_new += new
+                    print(f"[{dept_short}] title='{term}': {data.get('totalRecords',0)} total, {new} new")
+                for item in items:
+                    _add(item)
+                time.sleep(0.4)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(15)
+                else:
+                    print(f"[{dept_short}] '{term}' error: {e}")
 
     print(f"[{dept_short}] Total: {len(results)} opportunities ({total_new} unique from dept filter)")
     return results
