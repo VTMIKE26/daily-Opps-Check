@@ -362,6 +362,28 @@ HARD_EXCLUSIONS = [
     "translation services", "interpretation services",
     "attorney services", "legal representation",
     "financial audit services", "accounting services",
+    # Hardware & equipment procurement — Peregrine is software only
+    "purchase of equipment", "equipment procurement", "equipment acquisition",
+    "hardware and equipment", "purchase hardware",
+    "body armor", "protective equipment procurement",
+    "weapon system", "weapons system", "small arms",
+    "radio procurement", "radio acquisition", "portable radio",
+    "vehicle acquisition", "vehicle procurement", "fleet acquisition",
+    "license plate reader", "lpr procurement",
+    "surveillance camera", "camera system procurement",
+    "biometric device", "biometric hardware",
+    "taser procurement", "less lethal",
+    "furniture procurement", "office furniture",
+    "it equipment purchase", "computer equipment purchase",
+    "printer procurement", "copier procurement",
+    "mobile device procurement", "tablet procurement",
+    # Staffing-only contracts
+    "staffing services", "staff augmentation", "labor category",
+    "temporary staffing", "personnel services contract",
+    "security guard", "guard services", "physical security services",
+    # Training-only (not software training)
+    "firearms training", "defensive tactics", "use of force training",
+    "physical fitness", "k-9 training", "canine training",
 ]
 
 # Penalty signals — mismatch indicators (reduce score but don't exclude)
