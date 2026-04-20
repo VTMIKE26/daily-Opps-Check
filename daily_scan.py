@@ -154,7 +154,7 @@ CAPABILITY_CLUSTERS = [
             "data analytics", "analytics platform", "analytics tool",
             "data management", "data management platform",
             "data management system", "data solution",
-            "data platform", "data system", "data environment",
+            "data platform", "data environment",
             "analytics solution", "analytics service",
             "reporting tool", "reporting platform",
             "dashboard", "business intelligence",
@@ -399,6 +399,13 @@ HARD_EXCLUSIONS = [
     # Physical goods procurement
     "purchase of supplies", "office supplies",
     "janitorial supplies", "cleaning supplies",
+    # Network / telecom / infrastructure — not software
+    "vpn", "ethernet", "transport services", "network infrastructure",
+    "telecommunications", "telecom services", "internet service provider",
+    "network cabling", "structured cabling", "fiber optic",
+    "wireless network", "cellular services", "satellite services",
+    "bandwidth services", "circuit services", "wan services",
+    "network connectivity", "connectivity services",
 ]
 
 # Penalty signals — mismatch indicators (reduce score but don't exclude)
