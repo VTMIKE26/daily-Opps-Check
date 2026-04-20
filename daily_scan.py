@@ -183,6 +183,11 @@ CAPABILITY_CLUSTERS = [
             "operational analysis", "mission analytics",
             "visualization", "geospatial", "mapping platform",
             "predictive", "intelligence analysis",
+            # Digital evidence — DOJ DERP and similar platforms
+            "digital evidence", "evidence review platform",
+            "evidence analytics", "evidence management platform",
+            "media review platform", "digital forensics platform",
+            "investigative data platform",
         ],
     ),
     (
@@ -634,6 +639,10 @@ def fetch_sam_gov() -> list[Opportunity]:
         "artificial intelligence","machine learning",   "AI platform",
         # Secure Gov SaaS
         "fedramp",              "cjis",
+        # Digital evidence review — added for DOJ DERP and similar
+        "digital evidence",     "evidence review",
+        "evidence analytics",   "evidence management platform",
+        "media review platform","forensic platform",
     ]
     for term in TITLE_TERMS:
         _search(term, from_90, term)
