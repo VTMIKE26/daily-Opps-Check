@@ -2471,25 +2471,14 @@ def main():
                 if 0 <= days <= 7:
                     urgent_deadlines.append(days)
 
-    # Build dynamic subject line — useful preview, no red dot
-    # Include top opportunity title when available for richer inbox preview
-    top_title = ""
-    top_opps = [o for o in solicitations if "Strong" in o.tier or "Good" in o.tier]
-    if top_opps:
-        top_title = f" — {top_opps[0].title[:45].strip()}"
-
-    if strong == 0 and good == 0:
-        subject = f"🦅 Peregrine Intel | {possible} Possible Fits | {run_date}"
-    elif urgent_deadlines:
-        soonest = min(urgent_deadlines)
-        urgent_label = "Today" if soonest == 0 else f"{soonest}d left"
-        subject = f"⚡ Peregrine Intel | {strong} Strong · {good} Good | {urgent_label}{top_title} | {run_date}"
-    elif strong >= 5:
-        subject = f"🚀 Peregrine Intel | {strong} Strong · {good} Good Fits{top_title} | {run_date}"
+    # Simple clean subject — counts only, no opportunity titles or agency names
+    total_opps = strong + good + possible
+    if strong == 0 and good == 0 and possible == 0:
+        subject = f"Peregrine Daily Scanner | No Matches Today | {run_date}"
     elif strong >= 1:
-        subject = f"🦅 Peregrine Intel | {strong} Strong · {good} Good{top_title} | {run_date}"
+        subject = f"Peregrine Daily Scanner | {strong} Strong · {good} Good · {possible} Possible | {run_date}"
     else:
-        subject = f"🦅 Peregrine Intel | {good} Good · {possible} Possible{top_title} | {run_date}"
+        subject = f"Peregrine Daily Scanner | {good} Good · {possible} Possible Fits | {run_date}"
 
     # Fetch industry news separately (returns dicts, not Opportunities)
     print("\n[Industry News] Fetching relevant news...")
