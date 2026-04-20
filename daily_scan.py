@@ -989,13 +989,13 @@ def fetch_agency_targeted(dept_short: str, deptname_filter: str) -> list[Opportu
             r = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
                 params={
-                    "api_key":    SAM_API_KEY,
-                    "title":      term,
-                    "deptname":   deptname_filter,   # partial dept name match
-                    "postedFrom": from_90,
-                    "postedTo":   to_date,
-                    "active":     "Yes",
-                    "limit":      100,
+                    "api_key":          SAM_API_KEY,
+                    "title":            term,
+                    "organizationName": deptname_filter,  # replaces deprecated deptname
+                    "postedFrom":       from_90,
+                    "postedTo":         to_date,
+                    "active":           "Yes",
+                    "limit":            100,
                 },
                 headers=HEADERS, timeout=30,
             )
@@ -1017,13 +1017,109 @@ def fetch_agency_targeted(dept_short: str, deptname_filter: str) -> list[Opportu
 
 
 def fetch_doj_opportunities() -> list[Opportunity]:
-    """DOJ-scoped title search — ATF, FBI, DEA, BOP, OJP, CSOSA, USMS."""
-    return fetch_agency_targeted("DOJ", "justice")
+    """
+    DOJ-scoped title search.
+    Searches the parent DOJ umbrella AND key sub-agency names.
+    """
+    results  = []
+    seen_ids = set()
+
+    for opp in fetch_agency_targeted("DOJ", "Department of Justice"):
+        key = opp.notice_id or opp.title[:60].lower()
+        if key not in seen_ids:
+            seen_ids.add(key)
+            results.append(opp)
+
+    doj_sub_agencies = [
+        # Law enforcement bureaus
+        ("ATF",     "Alcohol Tobacco Firearms"),
+        ("FBI",     "Federal Bureau of Investigation"),
+        ("DEA",     "Drug Enforcement Administration"),
+        ("USMS",    "United States Marshals"),
+        # Corrections
+        ("BOP",     "Bureau of Prisons"),
+        ("FPI",     "Federal Prison Industries"),
+        # Grant-making / justice programs
+        ("OJP",     "Office of Justice Programs"),
+        ("BJA",     "Bureau of Justice Assistance"),
+        ("BJS",     "Bureau of Justice Statistics"),
+        ("NIJ",     "National Institute of Justice"),
+        ("OJJDP",   "Juvenile Justice"),
+        ("COPS",    "Community Oriented Policing"),
+        ("OVW",     "Violence Against Women"),
+        # Supervision / courts
+        ("CSOSA",   "Court Services and Offender"),
+        ("EOUSA",   "Executive Office for United States Attorneys"),
+        # Litigating / national security divisions
+        ("NSD",     "National Security Division"),
+        ("CRIMINAL","Criminal Division"),
+        ("EOIRF",   "Executive Office for Immigration Review"),
+        # Justice Management
+        ("JMD",     "Justice Management Division"),
+    ]
+    for label, org_name in doj_sub_agencies:
+        for opp in fetch_agency_targeted(f"DOJ/{label}", org_name):
+            key = opp.notice_id or opp.title[:60].lower()
+            if key not in seen_ids:
+                seen_ids.add(key)
+                results.append(opp)
+
+    print(f"[DOJ] Combined total: {len(results)} unique opportunities")
+    return results
 
 
 def fetch_dhs_opportunities() -> list[Opportunity]:
-    """DHS-scoped title search — HSI, ICE, CBP, USSS, TSA, CISA, FEMA."""
-    return fetch_agency_targeted("DHS", "homeland")
+    """
+    DHS-scoped title search.
+    Searches both the parent dept name AND key sub-agency names since
+    some DHS components appear under their own org names in SAM.gov.
+    """
+    results  = []
+    seen_ids = set()
+
+    # Primary: search under "Homeland Security" umbrella
+    for opp in fetch_agency_targeted("DHS", "Homeland Security"):
+        key = opp.notice_id or opp.title[:60].lower()
+        if key not in seen_ids:
+            seen_ids.add(key)
+            results.append(opp)
+
+    # Also search key sub-agencies by their standalone names
+    dhs_sub_agencies = [
+        # Border & enforcement
+        ("CBP",    "Customs and Border Protection"),
+        ("ICE",    "Immigration and Customs Enforcement"),
+        ("HSI",    "Homeland Security Investigations"),
+        # Maritime & military
+        ("USCG",   "Coast Guard"),
+        # Cybersecurity & infrastructure
+        ("CISA",   "Cybersecurity and Infrastructure Security"),
+        # Emergency management
+        ("FEMA",   "Federal Emergency Management"),
+        # Transportation
+        ("TSA",    "Transportation Security Administration"),
+        # Protection
+        ("USSS",   "Secret Service"),
+        # Immigration services
+        ("USCIS",  "Citizenship and Immigration Services"),
+        # Training
+        ("FLETC",  "Federal Law Enforcement Training"),
+        # Intelligence
+        ("IA",     "Intelligence and Analysis"),
+        # Science & Technology
+        ("ST",     "Science and Technology Directorate"),
+        # Management
+        ("MGMT",   "Management Directorate"),
+    ]
+    for label, org_name in dhs_sub_agencies:
+        for opp in fetch_agency_targeted(f"DHS/{label}", org_name):
+            key = opp.notice_id or opp.title[:60].lower()
+            if key not in seen_ids:
+                seen_ids.add(key)
+                results.append(opp)
+
+    print(f"[DHS] Combined total: {len(results)} unique opportunities")
+    return results
 
 
 # ---------------------------------------------------------------------------
