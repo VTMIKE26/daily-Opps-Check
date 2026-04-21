@@ -646,10 +646,12 @@ def fetch_sam_gov() -> list[Opportunity]:
 def fetch_doj_opportunities() -> list[Opportunity]:
     """
     DOJ-scoped: 5 orgs × 5 terms = 25 calls max.
-    Stops immediately if rate limited.
+    Uses its own rate-limit check — not blocked by general SAM fetch limit.
     """
-    if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
+    if not SAM_API_KEY:
         return []
+    # Reset flag in case general SAM fetch hit a transient 429
+    _SAM_RATE_LIMITED[0] = False
     results, seen_ids = [], set()
     today   = datetime.utcnow()
     to_date = today.strftime("%m/%d/%Y")
@@ -673,10 +675,12 @@ def fetch_doj_opportunities() -> list[Opportunity]:
 def fetch_dhs_opportunities() -> list[Opportunity]:
     """
     DHS-scoped: 4 orgs × 5 terms = 20 calls max.
-    Stops immediately if rate limited.
+    Resets rate-limit flag so a transient 429 in SAM general fetch
+    does not prevent DHS-specific searches from running.
     """
-    if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
+    if not SAM_API_KEY:
         return []
+    _SAM_RATE_LIMITED[0] = False
     results, seen_ids = [], set()
     today   = datetime.utcnow()
     to_date = today.strftime("%m/%d/%Y")
@@ -1668,9 +1672,11 @@ COMPETITORS = [
     # Corrections / supervision
     {"name": "Appriss",         "search": "Appriss corrections supervision software award",   "tags": ["appriss"]},
     {"name": "SuperCom",        "search": "SuperCom offender monitoring supervision",         "tags": ["supercom"]},
+    {"name": "Flock Safety",     "search": "Flock Safety license plate recognition law enforcement", "tags": ["flock safety", "flock camera"]},
 ]
 
 # RSS feeds that carry competitor news
+# Industry news feeds — scanned for competitor mentions
 COMPETITOR_NEWS_FEEDS = [
     {"url": "https://fedscoop.com/feed/",                   "source": "FedScoop"},
     {"url": "https://www.nextgov.com/rss/all/",             "source": "Nextgov"},
@@ -1679,6 +1685,25 @@ COMPETITOR_NEWS_FEEDS = [
     {"url": "https://www.police1.com/rss/all/",             "source": "Police1"},
     {"url": "https://www.corrections1.com/rss/all/",        "source": "Corrections1"},
     {"url": "https://www.govtech.com/security/rss.xml",     "source": "GovTech Security"},
+    {"url": "https://defensescoop.com/feed/",               "source": "DefenseScoop"},
+    {"url": "https://statescoop.com/feed/",                 "source": "StateScoop"},
+]
+
+# Google News RSS queries — one per competitor, pulls recent news directly
+# Format: https://news.google.com/rss/search?q=QUERY&hl=en-US&gl=US&ceid=US:en
+COMPETITOR_NEWS_QUERIES = [
+    ("Palantir",           "Palantir+federal+government+contract"),
+    ("Axon",               "Axon+Enterprise+law+enforcement+technology"),
+    ("ShotSpotter",        "ShotSpotter+OR+SoundThinking+police"),
+    ("Mark43",             "Mark43+records+management+police"),
+    ("Tyler Technologies", "Tyler+Technologies+public+safety+government"),
+    ("Motorola Solutions", "Motorola+Solutions+law+enforcement+data"),
+    ("IBM i2",             "IBM+i2+intelligence+analytics+government"),
+    ("Esri",               "Esri+law+enforcement+public+safety+GIS"),
+    ("Databricks",         "Databricks+government+law+enforcement+federal"),
+    ("Appriss",            "Appriss+criminal+justice+data"),
+    ("SuperCom",           "SuperCom+offender+monitoring+supervision"),
+    ("Flock Safety",        "Flock+Safety+license+plate+law+enforcement"),
 ]
 
 def fetch_competitor_intel() -> list[dict]:
@@ -1697,6 +1722,48 @@ def fetch_competitor_intel() -> list[dict]:
 
     all_tags = list(tag_map.keys())
 
+    # --- Pass 1: Google News RSS per competitor (most targeted) ---
+    def _fetch_gnews(comp_name: str, query: str, max_items: int = 5):
+        """Fetch Google News RSS for a competitor query, return list of items."""
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+        out = []
+        try:
+            resp = requests.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; PeregrineScanner/2.0)",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            }, timeout=15)
+            if resp.status_code != 200:
+                return out
+            root = ET.fromstring(resp.content)
+            for item in root.findall(".//item")[:max_items]:
+                title_el = item.find("title")
+                link_el  = item.find("link")
+                desc_el  = item.find("description")
+                date_el  = item.find("pubDate")
+                title = (title_el.text or "").strip() if title_el is not None else ""
+                desc  = unescape(re.sub(r"<[^>]+>", "", (desc_el.text or ""))).strip() if desc_el is not None else ""
+                url_  = (link_el.text or "").strip() if link_el is not None else ""
+                date_ = (date_el.text or "").strip() if date_el is not None else ""
+                if not title or title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                out.append({
+                    "competitor": comp_name,
+                    "title": title,
+                    "url": clean_url(url_, ""),
+                    "source": "Google News",
+                    "date": date_[:16] if date_ else "",
+                    "summary": desc[:300],
+                })
+        except Exception as e:
+            print(f"[CompetitorIntel] Google News {comp_name}: {e}")
+        return out
+
+    for comp_name, query in COMPETITOR_NEWS_QUERIES:
+        items_out.extend(_fetch_gnews(comp_name, query, max_items=5))
+        time.sleep(0.2)
+
+    # --- Pass 2: Industry RSS feeds (broader coverage) ---
     for feed in COMPETITOR_NEWS_FEEDS:
         try:
             resp = requests.get(feed["url"], headers={
@@ -1745,66 +1812,76 @@ def fetch_competitor_intel() -> list[dict]:
         except Exception as e:
             print(f"[CompetitorIntel] {feed['source']}: {e}")
 
-    # ── Palantir recompete signals from USASpending ─────────────────────────
-    # Find active Palantir contracts that are expiring within 12 months
-    palantir_recompetes = []
-    try:
-        today = datetime.utcnow()
-        # Contracts ending within next 12 months
-        end_soon = (today + timedelta(days=365)).strftime("%Y-%m-%d")
-        end_min  = today.strftime("%Y-%m-%d")
-        payload = {
-            "subawards": False, "limit": 10, "page": 1,
-            "filters": {
-                "keywords": ["palantir"],
-                "award_type_codes": ["A", "B", "C", "D"],
-                "time_period": [{"start_date": "2020-01-01", "end_date": end_soon}],
-            },
-            "fields": ["Award ID", "Recipient Name", "Start Date", "End Date",
-                       "Award Amount", "Awarding Agency", "Awarding Sub Agency", "Description"],
-        }
-        resp = requests.post(
-            "https://api.usaspending.gov/api/v2/search/spending_by_award/",
-            json=payload,
-            headers={**HEADERS, "Content-Type": "application/json"},
-            timeout=20,
-        )
-        if resp.status_code == 200:
-            awards = resp.json().get("results", [])
-            for award in awards:
-                end_date_str = award.get("End Date", "") or ""
-                if not end_date_str:
+    # ── Recompete signals from USASpending for ALL competitors ──────────────
+    recompetes = []
+    recompete_targets = [
+        ("Palantir",           ["palantir"]),
+        ("Axon",               ["axon enterprise", "axon public safety"]),
+        ("Tyler Technologies", ["tyler technologies"]),
+        ("Motorola Solutions", ["motorola solutions"]),
+        ("Mark43",             ["mark43"]),
+        ("IBM i2",             ["ibm i2", "i2 analyst"]),
+        ("ShotSpotter",        ["shotspotter", "soundthinking"]),
+        ("Flock Safety",       ["flock safety"]),
+    ]
+    today = datetime.utcnow()
+    end_soon = (today + timedelta(days=365)).strftime("%Y-%m-%d")
+    for comp_name, keywords in recompete_targets:
+        try:
+            payload = {
+                "subawards": False, "limit": 5, "page": 1,
+                "filters": {
+                    "keywords": keywords,
+                    "award_type_codes": ["A", "B", "C", "D"],
+                    "time_period": [{"start_date": "2020-01-01", "end_date": end_soon}],
+                },
+                "fields": ["Award ID", "Recipient Name", "Start Date", "End Date",
+                           "Award Amount", "Awarding Agency", "Awarding Sub Agency", "Description"],
+            }
+            resp = requests.post(
+                "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+                json=payload,
+                headers={**HEADERS, "Content-Type": "application/json"},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                continue
+            for award in resp.json().get("results", []):
+                end_str = (award.get("End Date", "") or "")[:10]
+                if not end_str:
                     continue
                 try:
-                    end_dt = datetime.strptime(end_date_str[:10], "%Y-%m-%d")
+                    end_dt    = datetime.strptime(end_str, "%Y-%m-%d")
                     days_left = (end_dt - today).days
                     if days_left < 0 or days_left > 365:
                         continue
-                    urgency = "🔴 Expires < 90 days" if days_left < 90 else "🟡 Expires < 180 days" if days_left < 180 else "🟢 Expires < 1 year"
-                    agency = award.get("Awarding Agency", "")
-                    sub = award.get("Awarding Sub Agency", "")
-                    amount = award.get("Award Amount", 0) or 0
-                    desc = (award.get("Description", "") or "")[:150]
+                    urgency  = ("🔴 Expires < 90d" if days_left < 90
+                                else "🟡 Expires < 180d" if days_left < 180
+                                else "🟢 Expires < 1yr")
+                    agency   = award.get("Awarding Agency", "")
+                    sub      = award.get("Awarding Sub Agency", "")
+                    amount   = award.get("Award Amount", 0) or 0
+                    desc     = (award.get("Description", "") or "")[:150]
                     award_id = award.get("Award ID", "")
-                    palantir_recompetes.append({
-                        "competitor": "Palantir — Recompete Alert",
-                        "title": f"{urgency} | Palantir contract @ {agency} ({sub}) — ${amount:,.0f}",
-                        "url": clean_url(f"https://www.usaspending.gov/award/{award_id}/", "https://www.usaspending.gov"),
+                    recompetes.append({
+                        "competitor": f"{comp_name} — Recompete Alert",
+                        "title":  f"{urgency} | {comp_name} @ {agency} — ${amount:,.0f}",
+                        "url":    clean_url(f"https://www.usaspending.gov/award/{award_id}/",
+                                            "https://www.usaspending.gov"),
                         "source": "USASpending.gov",
-                        "date": end_date_str[:10],
-                        "summary": f"Contract ends {end_date_str[:10]} ({days_left} days). {desc}",
+                        "date":   end_str,
+                        "summary": f"Contract ends {end_str} ({days_left}d left). {desc}",
                         "is_recompete": True,
                         "days_left": days_left,
-                        "urgency": urgency,
                     })
                 except Exception:
                     continue
-        print(f"[Palantir Recompetes] {len(palantir_recompetes)} expiring contracts found")
-    except Exception as e:
-        print(f"[Palantir Recompetes] Error: {e}")
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[Recompetes] {comp_name}: {e}")
 
-    # Merge recompetes into output (they'll render in their own subsection)
-    items_out.extend(palantir_recompetes)
+    print(f"[Recompetes] {len(recompetes)} expiring competitor contracts found")
+    items_out.extend(recompetes)
 
     # Sort by competitor name, then deduplicate same story from multiple feeds
     seen_story_titles = set()
