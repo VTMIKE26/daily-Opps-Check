@@ -1906,54 +1906,9 @@ def fetch_competitor_intel() -> list[dict]:
         items_out.extend(_fetch_gnews(comp_name, query, max_items=5))
         time.sleep(0.2)
 
-    # --- Pass 2: Industry RSS feeds (broader coverage) ---
-    for feed in COMPETITOR_NEWS_FEEDS:
-        try:
-            resp = requests.get(feed["url"], headers={
-                "User-Agent": "PeregrineScanner/2.0",
-                "Accept": "application/rss+xml, application/xml, text/xml",
-            }, timeout=15)
-            if resp.status_code != 200:
-                print(f"[CompetitorIntel] {feed['source']}: HTTP {resp.status_code}")
-                continue
-
-            root = ET.fromstring(resp.content)
-            feed_items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
-
-            for item in feed_items[:15]:
-                title_el = item.find("title")
-                link_el  = item.find("link")
-                desc_el  = item.find("description") or item.find("summary")
-                date_el  = item.find("pubDate") or item.find("published")
-
-                title = (title_el.text or "").strip() if title_el is not None else ""
-                desc  = unescape(re.sub(r"<[^>]+>", "", (desc_el.text or ""))).strip() if desc_el is not None else ""
-                url_  = (link_el.text or "").strip() if link_el is not None else ""
-                date_ = (date_el.text or "").strip() if date_el is not None else ""
-
-                if not title or title in seen_titles:
-                    continue
-
-                combined = f"{title} {desc}".lower()
-
-                # Find which competitors are mentioned
-                tags_found = [tag_map[tag] for tag in all_tags if tag in combined]
-                if not tags_found:
-                    continue
-
-                seen_titles.add(title)
-                items_out.append({
-                    "competitor": ", ".join(sorted(set(tags_found))),
-                    "title": title,
-                    "url": clean_url(url_, ""),
-                    "source": feed["source"],
-                    "date": date_[:10] if date_ else "",
-                    "summary": desc[:250],
-                })
-
-            time.sleep(0.2)
-        except Exception as e:
-            print(f"[CompetitorIntel] {feed['source']}: {e}")
+    # Industry RSS feeds removed from competitor intel — they overlap with
+    # Industry News section and cause false multi-competitor attribution.
+    # Google News per-competitor (Pass 1) provides cleaner targeted coverage.
 
     # ── Recompete signals from USASpending for ALL competitors ──────────────
     recompetes = []
