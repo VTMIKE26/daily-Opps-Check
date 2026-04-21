@@ -1,11 +1,11 @@
 name: Keep Workflows Active
 
-# Prevents GitHub from disabling scheduled workflows after 60 days of inactivity.
-# Commits a timestamp file once per weekday morning, 10 min before the scanner.
+# Commits a timestamp every weekday to prevent GitHub disabling
+# scheduled workflows after 60 days of repo inactivity.
 
 on:
   schedule:
-    - cron: '50 11 * * 1-5'   # 6:50 AM EST/EDT
+    - cron: '0 11 * * 1-5'   # 6:00 AM EST (UTC 11) — before scanner fires
   workflow_dispatch:
 
 concurrency:
@@ -17,18 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update activity timestamp
+      - name: Timestamp commit
         run: |
-          mkdir -p .github
           echo "$(date -u '+%Y-%m-%d %H:%M UTC')" > .github/last_active.txt
-          git config user.name  "Peregrine Bot"
+          git config user.name "Peregrine Bot"
           git config user.email "actions@github.com"
           git add .github/last_active.txt
-          git diff --staged --quiet && echo "No changes needed" || \
-            (git commit -m "chore: keep-alive $(date -u '+%Y-%m-%d') [skip ci]" && git push)
+          git diff --staged --quiet && echo "No change" || \
+            git commit -m "chore: keep-alive $(date -u '+%Y-%m-%d') [skip ci]" && git push
