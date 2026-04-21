@@ -1,17 +1,17 @@
 name: Peregrine Daily Federal Scanner
 
 on:
-  schedule:
-    # 7:00 AM EST = 12:00 UTC (Nov-Mar)
-    # 7:00 AM EDT = 11:00 UTC (Mar-Nov)
-    # Run both so it fires at exactly 7am regardless of daylight saving
-    - cron: '0 11 * * 1-5'
-    - cron: '0 12 * * 1-5'
+  # Primary trigger: called by cron-job.org via workflow_dispatch
+  # cron-job.org hits: POST /repos/VTMIKE26/daily-Opps-Check/actions/workflows/daily_scan.yml/dispatches
+  # This fires at EXACTLY 7:00 AM EST/EDT every weekday — no GitHub queue delays
   workflow_dispatch:
 
-# CRITICAL: prevents duplicate runs when both crons fire on the same day.
-# Same group name = only one run allowed at a time. The second cron that
-# fires will wait if the first is still running, or skip if already done.
+  # Backup: GitHub native cron in case cron-job.org misses a day
+  # Scheduled slightly later (7:20am) so it only runs if dispatch didn't fire
+  schedule:
+    - cron: '20 12 * * 1-5'   # 7:20 AM EST backup (UTC 12:20)
+    - cron: '20 11 * * 1-5'   # 7:20 AM EDT backup (UTC 11:20)
+
 concurrency:
   group: peregrine-daily-scanner
   cancel-in-progress: false
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   daily-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +46,7 @@ jobs:
         with:
           name: digest-${{ github.run_id }}
           path: digest_*.html
-          retention-days: 60
+          retention-days: 30
 
       - name: Alert on failure
         if: failure()
@@ -61,11 +61,10 @@ jobs:
                      "Content-Type": "application/json"},
             json={
               "personalizations": [{"to": [{"email": "mike.kelly@peregrine.io"}],
-                                    "subject": "Peregrine Scanner Failed Today"}],
-              "from": {"email": "mikefkelly26@gmail.com",
-                       "name": "Peregrine Federal Scanner"},
+                                    "subject": "⚠️ Peregrine Scanner Failed Today"}],
+              "from": {"email": "mikefkelly26@gmail.com", "name": "Peregrine Scanner"},
               "content": [{"type": "text/plain",
-                           "value": "The daily scanner failed. Check GitHub Actions: https://github.com/VTMIKE26/daily-Opps-Check/actions"}],
+                           "value": "The scanner failed. Check: https://github.com/VTMIKE26/daily-Opps-Check/actions"}],
             }
           )
           PYEOF
