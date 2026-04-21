@@ -296,8 +296,7 @@ CAPABILITY_CLUSTERS = [
             "legacy platform", "legacy system",
             "legacy modernization", "platform modernization",
             "platform migration", "technology refresh",
-            "system modernization", "system replacement",
-            "data platform upgrade",
+            "system modernization",             "data platform upgrade",
             "it modernization", "digital transformation",
             "software modernization", "cloud migration",
             "application modernization",
@@ -409,6 +408,21 @@ HARD_EXCLUSIONS = [
     "mobile devices", "smartphones", "cell phones",
     "laptops", "desktops", "workstations",
     "printers", "copiers", "scanners",
+    # Physical facilities and infrastructure — not software
+    "fire suppression", "fire alarm", "fire protection",
+    "audio system", "audio visual", "av system",
+    "hvac", "plumbing", "electrical system",
+    "roof replacement", "flooring replacement", "window replacement",
+    "elevator", "escalator", "generator replacement",
+    "lighting system", "lighting replacement",
+    "physical security system", "access control hardware",
+    "camera installation", "cctv installation",
+    # Maintenance contracts — not software development
+    "annual maintenance", "annual software maintenance",
+    "software maintenance agreement", "maintenance and support contract",
+    "hardware maintenance", "software assurance",
+    # Embassy / consular / facilities
+    "embassy", "consular", "chancery",
     # Military hardware, aircraft, weapons systems — not Peregrine's market
     "crypto modernization", "cryptographic", "encryption hardware",
     "router solution", "b-52", "aircraft", "avionics",
@@ -1303,8 +1317,9 @@ def _possible_fits(non_events: list, tiers: dict, shown: set = None) -> list:
 
     # Fallback 2: title keyword matches, not already shown
     TITLE_KEYWORDS = [
-        # Only words that genuinely imply a software/data/analytics need
-        "analytics", "platform", "software",
+        # Only compound phrases that genuinely imply a software/data/analytics need
+        "analytics platform", "data platform",
+        "software platform", "analytics solution",
         "intelligence platform", "data integration", "data analytics",
         "modernization", "investigation platform", "law enforcement analytics",
         "public safety platform", "corrections platform",
