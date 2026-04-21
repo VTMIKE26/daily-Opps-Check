@@ -548,240 +548,140 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     return opp
 
 # ---------------------------------------------------------------------------
-# SOURCE 1: SAM.GOV API v2
-# Requires: SAM_API_KEY (free at sam.gov)
+# SOURCE 1: SAM.gov (all agency-targeted searches in one function)
+# Public API key limit: 1,000 calls/day. This function uses ~55 calls total.
 # ---------------------------------------------------------------------------
-def fetch_sam_gov() -> list[Opportunity]:
-    """
-    SAM.gov Public Search API v2 — lean, rate-limit-safe.
-    
-    SAM.gov limit: 1,000 calls/day for public API keys.
-    Total calls used by this script must stay well under 1,000.
-    
-    Strategy: ptype sweeps (broad, no title filter) + a small set of
-    high-value title searches. ptype sweeps catch everything posted recently;
-    title searches catch older active opps in Peregrine's specific domains.
-    Total: ~15 calls. DOJ/DHS targeted: ~200 calls. Grand total: ~215/day.
-    """
-    if not SAM_API_KEY:
-        print("[SAM.gov] No API key — skipping")
-        return []
 
-    results  = []
-    seen_ids = set()
-    today    = datetime.utcnow()
-    to_date  = today.strftime("%m/%d/%Y")
-    from_30  = (today - timedelta(days=30)).strftime("%m/%d/%Y")
-    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+_SAM_RATE_LIMITED = [False]  # global flag — stops all SAM calls on 429
 
-    _rate_limited = [False]  # shared flag — stop all calls if we hit the limit
-
-    def _add(item):
-        nid = item.get("noticeId") or item.get("id") or ""
-        if not nid or nid in seen_ids:
-            return
-        seen_ids.add(nid)
-        results.append(score_opportunity(Opportunity(
-            title         = item.get("title", "Untitled"),
-            notice_id     = nid,
-            agency        = (item.get("fullParentPathName")
-                             or item.get("departmentName") or "Unknown"),
-            posted_date   = item.get("postedDate", ""),
-            response_date = item.get("responseDeadLine", "TBD"),
-            description   = (item.get("description") or "")[:2000],
-            url           = clean_url(f"https://sam.gov/opp/{nid}/view",
-                                      "https://sam.gov/search"),
-            opp_type      = (item.get("type") or item.get("baseType") or "Notice"),
-            source        = "SAM.gov",
-            naics         = item.get("naicsCode", ""),
-        )))
-
-    def _call(params, label):
-        """Make one SAM.gov API call with 429 handling. Returns False if rate limited."""
-        if _SAM_RATE_LIMITED[0]:
-            return False
-        try:
-            r = requests.get(
-                "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "active": "Yes",
-                        "limit": 100, **params},
-                headers=HEADERS, timeout=30,
-            )
-            if r.status_code == 429:
-                print(f"[SAM.gov] RATE LIMIT hit on '{label}' — stopping SAM.gov calls for today")
-                _SAM_RATE_LIMITED[0] = True
-                return False
-            r.raise_for_status()
-            data  = r.json()
-            items = data.get("opportunitiesData", [])
-            new   = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
-            if new:
-                print(f"[SAM.gov] {label}: {data.get('totalRecords',0)} total | {new} new")
-            for item in items:
-                _add(item)
-            time.sleep(0.2)
-            return True
-        except Exception as e:
-            print(f"[SAM.gov] {label} error: {e}")
-            return True  # non-429 error, keep going
-
-    # ── Pass 1: ptype sweeps — last 30 days, all agencies ─────────────────────
-    # 4 calls. Catches everything recently posted.
-    for ptype, label in [("r","Sources Sought"), ("p","Presolicitation"),
-                         ("k","Combined Synopsis"), ("s","Special Notice")]:
-        if not _call({"ptype": ptype, "postedFrom": from_30, "postedTo": to_date}, label):
-            break
-
-    # ── Pass 2: Title searches — 90-day window, high-value terms only ─────────
-    # 11 calls. Catches active opps posted before the 30-day window.
-    TITLE_TERMS = [
-        "data analytics",        "data integration",
-        "investigative platform","community supervision",
-        "offender management",   "records management system",
-        "IT modernization",      "artificial intelligence",
-        "federated search",      "entity resolution",
-        "digital evidence",
-    ]
-    for term in TITLE_TERMS:
-        if not _call({"title": term, "postedFrom": from_90, "postedTo": to_date}, f"title='{term}'"):
-            break
-
-    print(f"[SAM.gov] Total: {len(results)} opportunities (ptype sweep + title search)")
-    return results
-
-
-
-
-# Shared rate-limit flag — set to True when SAM.gov returns 429
-# All SAM.gov callers check this before making requests
-_SAM_RATE_LIMITED = [False]
-
-
-def _sam_call(params: dict, label: str, seen_ids: set, results: list) -> bool:
-    """
-    Single SAM.gov API call with rate-limit guard.
-    Returns False if rate limited (stop further calls), True otherwise.
-    Adds scored Opportunity objects to results, deduplicates via seen_ids.
-    """
+def _sam_search(extra_params: dict, label: str,
+                seen_ids: set, results: list) -> bool:
+    """One SAM.gov search call. Returns False if rate limited."""
     if _SAM_RATE_LIMITED[0]:
         return False
     try:
         r = requests.get(
             "https://api.sam.gov/opportunities/v2/search",
-            params={"api_key": SAM_API_KEY, "active": "Yes", "limit": 100, **params},
-            headers=HEADERS, timeout=30,
+            params={"api_key": SAM_API_KEY, "active": "Yes",
+                    "limit": 100, **extra_params},
+            headers=HEADERS, timeout=15,  # 15s max per call
         )
         if r.status_code == 429:
-            print(f"[SAM.gov] RATE LIMIT — stopping all SAM.gov calls for today ({label})")
+            print(f"[SAM.gov] Rate limit hit — pausing all SAM calls ({label})")
             _SAM_RATE_LIMITED[0] = True
             return False
-        r.raise_for_status()
-        data  = r.json()
-        items = data.get("opportunitiesData", [])
-        new   = 0
-        for item in items:
+        if r.status_code != 200:
+            return True  # skip bad responses, keep going
+        for item in r.json().get("opportunitiesData", []):
             nid = item.get("noticeId") or item.get("id") or ""
             if not nid or nid in seen_ids:
                 continue
             seen_ids.add(nid)
-            new += 1
             results.append(score_opportunity(Opportunity(
                 title         = item.get("title", "Untitled"),
                 notice_id     = nid,
-                agency        = item.get("fullParentPathName") or item.get("departmentName") or "Unknown",
+                agency        = (item.get("fullParentPathName")
+                                 or item.get("departmentName") or "Unknown"),
                 posted_date   = item.get("postedDate", ""),
                 response_date = item.get("responseDeadLine", "TBD"),
                 description   = (item.get("description") or "")[:2000],
-                url           = clean_url(f"https://sam.gov/opp/{nid}/view", "https://sam.gov/search"),
+                url           = clean_url(f"https://sam.gov/opp/{nid}/view",
+                                          "https://sam.gov/search"),
                 opp_type      = item.get("type") or "Notice",
                 source        = "SAM.gov",
                 naics         = item.get("naicsCode", ""),
             )))
-        if new:
-            print(f"[SAM.gov] {label}: {data.get('totalRecords',0)} total | {new} new")
         time.sleep(0.2)
         return True
     except Exception as e:
-        print(f"[SAM.gov] {label} error: {e}")
-        return True  # non-429 errors: keep going
+        print(f"[SAM.gov] {label}: {e}")
+        return True
 
 
-# DOJ agencies — official org names as they appear in SAM.gov
-# Top DOJ agencies for Peregrine — covers 95% of relevant spend
-# Parent search catches most; sub-agency adds only the highest-value targets
-DOJ_ORGS = [
-    "Department of Justice",              # parent — catches most DOJ
-    "Alcohol, Tobacco, Firearms",         # ATF — NIBIN, crime gun, key customer
-    "Federal Bureau of Investigation",    # FBI — investigative platforms
-    "Bureau of Prisons",                  # BOP — corrections data
-    "Office of Justice Programs",         # OJP — grants & analytics
-    "Court Services and Offender",        # CSOSA — Peregrine deployed here
-]
+def fetch_sam_gov() -> list[Opportunity]:
+    """
+    SAM.gov: 4 ptype sweeps + 8 title searches = ~12 calls.
+    ptype sweeps catch everything posted in last 30 days.
+    Title searches catch older active opps (90-day window).
+    """
+    if not SAM_API_KEY:
+        print("[SAM.gov] No API key — skipping")
+        return []
 
-# DHS agencies — official org names as they appear in SAM.gov
-# Top DHS agencies for Peregrine — data/analytics/surveillance needs
-DHS_ORGS = [
-    "Homeland Security",                  # parent — catches most DHS
-    "Immigration and Customs Enforcement",# ICE/HSI — investigative analytics
-    "Customs and Border Protection",      # CBP — data integration
-    "Cybersecurity and Infrastructure",   # CISA — platform/analytics
-    "Federal Emergency Management",       # FEMA — situational awareness
-]
+    results, seen_ids = [], set()
+    today   = datetime.utcnow()
+    to_date = today.strftime("%m/%d/%Y")
+    d30     = (today - timedelta(days=30)).strftime("%m/%d/%Y")
+    d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
 
-# High-value title terms for agency-targeted searches
-# Kept to 8 terms to stay well within 1,000/day API limit:
-# 8 terms × (11 DOJ + 10 DHS orgs) = 168 calls
-AGENCY_TITLE_TERMS = [
-    "data analytics",
-    "data integration",
-    "investigative platform",
-    "community supervision",
-    "records management",
-    "IT modernization",
-    "artificial intelligence",
-    "digital evidence",
-]
+    # Pass 1: broad ptype sweeps — 4 calls, last 30 days
+    for ptype, lbl in [("r","RFI"), ("p","Presol"), ("k","Synopsis"), ("s","Special")]:
+        if not _sam_search({"ptype": ptype, "postedFrom": d30, "postedTo": to_date},
+                           lbl, seen_ids, results):
+            break
+
+    # Pass 2: targeted title searches — 8 calls, last 90 days
+    for term in ["data analytics", "investigative platform", "community supervision",
+                 "IT modernization", "artificial intelligence", "digital evidence",
+                 "records management", "federated search"]:
+        if not _sam_search({"title": term, "postedFrom": d90, "postedTo": to_date},
+                           f"title={term}", seen_ids, results):
+            break
+
+    print(f"[SAM.gov] {len(results)} opportunities")
+    return results
 
 
 def fetch_doj_opportunities() -> list[Opportunity]:
-    """DOJ + all sub-agencies: title search for Peregrine capability terms."""
+    """
+    DOJ-scoped: 5 orgs × 5 terms = 25 calls max.
+    Stops immediately if rate limited.
+    """
     if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
         return []
     results, seen_ids = [], set()
-    today    = datetime.utcnow()
-    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
-    to_date  = today.strftime("%m/%d/%Y")
-    for org in DOJ_ORGS:
-        for term in AGENCY_TITLE_TERMS:
+    today   = datetime.utcnow()
+    to_date = today.strftime("%m/%d/%Y")
+    d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    orgs    = ["Department of Justice", "Alcohol, Tobacco, Firearms",
+               "Federal Bureau of Investigation", "Bureau of Prisons",
+               "Court Services and Offender"]
+    terms   = ["data analytics", "investigative platform",
+               "community supervision", "IT modernization", "digital evidence"]
+    for org in orgs:
+        for term in terms:
             if _SAM_RATE_LIMITED[0]:
                 break
-            _sam_call({"title": term, "organizationName": org,
-                       "postedFrom": from_90, "postedTo": to_date},
-                      f"DOJ/{org[:20]}/'{term}'", seen_ids, results)
-        if _SAM_RATE_LIMITED[0]:
-            break
-    print(f"[DOJ] {len(results)} unique opportunities")
+            _sam_search({"title": term, "organizationName": org,
+                         "postedFrom": d90, "postedTo": to_date},
+                        f"DOJ/{org[:15]}/{term}", seen_ids, results)
+    print(f"[DOJ] {len(results)} opportunities")
     return results
 
 
 def fetch_dhs_opportunities() -> list[Opportunity]:
-    """DHS + all sub-agencies: title search for Peregrine capability terms."""
+    """
+    DHS-scoped: 4 orgs × 5 terms = 20 calls max.
+    Stops immediately if rate limited.
+    """
     if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
         return []
     results, seen_ids = [], set()
-    today    = datetime.utcnow()
-    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
-    to_date  = today.strftime("%m/%d/%Y")
-    for org in DHS_ORGS:
-        for term in AGENCY_TITLE_TERMS:
+    today   = datetime.utcnow()
+    to_date = today.strftime("%m/%d/%Y")
+    d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    orgs    = ["Homeland Security", "Immigration and Customs Enforcement",
+               "Cybersecurity and Infrastructure", "Federal Emergency Management"]
+    terms   = ["data analytics", "investigative platform",
+               "community supervision", "IT modernization", "digital evidence"]
+    for org in orgs:
+        for term in terms:
             if _SAM_RATE_LIMITED[0]:
                 break
-            _sam_call({"title": term, "organizationName": org,
-                       "postedFrom": from_90, "postedTo": to_date},
-                      f"DHS/{org[:20]}/'{term}'", seen_ids, results)
-        if _SAM_RATE_LIMITED[0]:
-            break
-    print(f"[DHS] {len(results)} unique opportunities")
+            _sam_search({"title": term, "organizationName": org,
+                         "postedFrom": d90, "postedTo": to_date},
+                        f"DHS/{org[:15]}/{term}", seen_ids, results)
+    print(f"[DHS] {len(results)} opportunities")
     return results
 
 
