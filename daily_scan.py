@@ -793,6 +793,168 @@ def fetch_dhs_opportunities() -> list[Opportunity]:
 
 
 
+# ---------------------------------------------------------------------------
+# SOURCE 2: FEDERAL REGISTER API
+# ---------------------------------------------------------------------------
+def fetch_federal_register() -> list[Opportunity]:
+    """Search Federal Register for RFI/Sources Sought notices (10-day window)."""
+    results   = []
+    seen_ids  = set()
+    today     = datetime.utcnow()
+    since     = (today - timedelta(days=10)).strftime("%Y-%m-%d")
+
+    search_terms = [
+        "data integration",      "data analytics",
+        "law enforcement analytics", "public safety analytics",
+        "community supervision", "offender management",
+        "federated search",      "entity resolution",
+        "IT modernization",      "artificial intelligence",
+        "investigative platform","records management",
+        "crime analytics",       "corrections platform",
+        "palantir",              "digital evidence",
+        "fedramp",               "cjis",
+    ]
+
+    for term in search_terms:
+        try:
+            url_params = (
+                f"conditions[term]={requests.utils.quote(term)}"
+                f"&conditions[publication_date][gte]={since}"
+                f"&conditions[type][]=NOTICE"
+                f"&per_page=20&order=newest"
+                f"&fields[]=document_number&fields[]=title&fields[]=abstract"
+                f"&fields[]=publication_date&fields[]=agencies&fields[]=html_url"
+                f"&fields[]=comments_close_on"
+            )
+            resp = requests.get(
+                f"https://www.federalregister.gov/api/v1/documents.json?{url_params}",
+                headers={"User-Agent": HEADERS["User-Agent"]},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                continue
+            docs = resp.json().get("results", [])
+            for doc in docs:
+                doc_id = doc.get("document_number", "")
+                if doc_id in seen_ids:
+                    continue
+                seen_ids.add(doc_id)
+                title    = doc.get("title", "Untitled")
+                abstract = doc.get("abstract", "") or ""
+                agencies = ", ".join(
+                    a.get("name", "") for a in doc.get("agencies", []) if a.get("name")
+                )
+                pub_date     = doc.get("publication_date", "")
+                comment_date = doc.get("comments_close_on", "TBD")
+                url          = doc.get("html_url", f"https://www.federalregister.gov/documents/{doc_id}")
+                combined     = f"{title} {abstract}".lower()
+                rfi_signals  = [
+                    "request for information", "sources sought", "industry day",
+                    "market research", "request for proposal", "pre-solicitation",
+                    "notice of intent", "broad agency announcement",
+                ]
+                if not any(sig in combined for sig in rfi_signals):
+                    continue
+                opp = Opportunity(
+                    title=title, notice_id=f"FR-{doc_id}",
+                    agency=agencies or "Federal Agency",
+                    posted_date=pub_date,
+                    response_date=str(comment_date) if comment_date else "TBD",
+                    description=abstract[:2000], url=clean_url(url, "https://www.federalregister.gov"),
+                    opp_type="Federal Register RFI", source="Federal Register",
+                )
+                results.append(score_opportunity(opp))
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[FederalRegister] Error for '{term}': {e}")
+
+    print(f"[Federal Register] {len(results)} notices fetched")
+    return results
+
+
+# ---------------------------------------------------------------------------
+# SOURCE 3: USASPENDING.GOV API — competitive intel
+# ---------------------------------------------------------------------------
+def fetch_usaspending_intel() -> list[Opportunity]:
+    """Recent contract awards in Peregrine's space — competitive intelligence."""
+    results   = []
+    seen_ids  = set()
+    today     = datetime.utcnow()
+    start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
+    end_date   = today.strftime("%Y-%m-%d")
+
+    keyword_batches = [
+        ["law enforcement software"],  ["public safety platform"],
+        ["data integration"],          ["crime analytics"],
+        ["community supervision"],     ["offender management"],
+        ["investigative software"],    ["palantir"],
+        ["data analytics platform"],   ["records management system"],
+        ["criminal justice software"], ["corrections software"],
+    ]
+
+    for keywords in keyword_batches:
+        payload = {
+            "subawards": False, "limit": 10, "page": 1,
+            "filters": {
+                "keywords": keywords,
+                "award_type_codes": ["A", "B", "C", "D"],
+                "time_period": [{"start_date": start_date, "end_date": end_date}],
+            },
+            "fields": ["Award ID", "Recipient Name", "Start Date", "End Date",
+                       "Award Amount", "Awarding Agency", "Awarding Sub Agency",
+                       "Description", "Contract Award Type"],
+            "sort": "Award Amount", "order": "desc",
+        }
+        try:
+            resp = requests.post(
+                "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+                json=payload,
+                headers={**HEADERS, "Content-Type": "application/json"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            awards = resp.json().get("results", [])
+            print(f"[USASpending] {keywords}: {len(awards)} awards returned")
+            for award in awards:
+                award_id  = award.get("Award ID", "")
+                nid       = f"USA-{award_id}"
+                if nid in seen_ids:
+                    continue
+                seen_ids.add(nid)
+                amount    = award.get("Award Amount", 0) or 0
+                recipient = award.get("Recipient Name", "Unknown")
+                agency    = award.get("Awarding Agency", "")
+                sub       = award.get("Awarding Sub Agency", "")
+                desc      = award.get("Description", "") or ""
+                start     = award.get("Start Date", "")
+                end       = award.get("End Date", "")
+                title     = f"[AWARD INTEL] {desc[:80] or 'Contract'} — {recipient}"
+                desc_full = (
+                    f"Recent award to {recipient} by {agency} ({sub}). "
+                    f"Contract value: ${amount:,.0f}. Period: {start} to {end}. "
+                    f"Description: {desc[:500]}. "
+                    f"COMPETITIVE INTEL: Watch for recompetes or follow-on opportunities."
+                )
+                opp = Opportunity(
+                    title=title, notice_id=nid,
+                    agency=f"{agency} / {sub}",
+                    posted_date=start or end_date,
+                    response_date="Watch for recompete",
+                    description=desc_full,
+                    url=clean_url(f"https://www.usaspending.gov/award/{award_id}/", "https://www.usaspending.gov"),
+                    opp_type="Award Intel", source="USASpending.gov",
+                )
+                results.append(score_opportunity(opp))
+            time.sleep(0.5)
+        except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", "N/A")
+            print(f"[USASpending] Error for {keywords}: {type(e).__name__}: {e} (HTTP {status})")
+
+    print(f"[USASpending] {len(results)} award intel records fetched")
+    return results
+
+
+
 def fetch_agency_rss_feeds() -> list[Opportunity]:
     results = []
 
