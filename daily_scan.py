@@ -553,21 +553,15 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 # ---------------------------------------------------------------------------
 def fetch_sam_gov() -> list[Opportunity]:
     """
-    SAM.gov Public Search API v2.
-
-    KEY FACTS (from API docs):
-      - Correct param is "title" (title-field search), NOT "keyword"
-      - "keyword" does not exist in this API — that is why we returned nothing
-      - ptype codes: r=Sources Sought, p=Presolicitation, k=Combined Synopsis/Solicitation,
-                     o=Solicitation, s=Special Notice, a=Award Notice
-      - Rate limit: 1,000 calls/day with public API key
-      - Endpoint: https://api.sam.gov/opportunities/v2/search
-
-    Strategy:
-      Search by TITLE using short terms that appear in solicitation titles.
-      Each call returns up to 100 results sorted by posted date.
-      We run one call per capability term — no NAICS filter so we catch
-      opportunities regardless of how the agency classified them.
+    SAM.gov Public Search API v2 — lean, rate-limit-safe.
+    
+    SAM.gov limit: 1,000 calls/day for public API keys.
+    Total calls used by this script must stay well under 1,000.
+    
+    Strategy: ptype sweeps (broad, no title filter) + a small set of
+    high-value title searches. ptype sweeps catch everything posted recently;
+    title searches catch older active opps in Peregrine's specific domains.
+    Total: ~15 calls. DOJ/DHS targeted: ~200 calls. Grand total: ~215/day.
     """
     if not SAM_API_KEY:
         print("[SAM.gov] No API key — skipping")
@@ -577,8 +571,10 @@ def fetch_sam_gov() -> list[Opportunity]:
     seen_ids = set()
     today    = datetime.utcnow()
     to_date  = today.strftime("%m/%d/%Y")
-    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
     from_30  = (today - timedelta(days=30)).strftime("%m/%d/%Y")
+    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+
+    _rate_limited = [False]  # shared flag — stop all calls if we hit the limit
 
     def _add(item):
         nid = item.get("noticeId") or item.get("id") or ""
@@ -600,542 +596,203 @@ def fetch_sam_gov() -> list[Opportunity]:
             naics         = item.get("naicsCode", ""),
         )))
 
-    def _search(title_term, from_date, label):
-        """Single title search — correct SAM.gov v2 param is 'title'."""
+    def _call(params, label):
+        """Make one SAM.gov API call with 429 handling. Returns False if rate limited."""
+        if _SAM_RATE_LIMITED[0]:
+            return False
         try:
             r = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
-                params={
-                    "api_key":    SAM_API_KEY,
-                    "title":      title_term,   # ← correct param, not "keyword"
-                    "postedFrom": from_date,
-                    "postedTo":   to_date,
-                    "active":     "Yes",        # active opportunities only
-                    "limit":      100,
-                },
-                headers=HEADERS,
-                timeout=30,
+                params={"api_key": SAM_API_KEY, "active": "Yes",
+                        "limit": 100, **params},
+                headers=HEADERS, timeout=30,
             )
+            if r.status_code == 429:
+                print(f"[SAM.gov] RATE LIMIT hit on '{label}' — stopping SAM.gov calls for today")
+                _SAM_RATE_LIMITED[0] = True
+                return False
             r.raise_for_status()
             data  = r.json()
             items = data.get("opportunitiesData", [])
-            total = data.get("totalRecords", 0)
-            new   = sum(1 for i in items
-                        if (i.get("noticeId") or i.get("id","")) not in seen_ids)
-            if total:
-                print(f"[SAM.gov] '{title_term}': {total} total | "
-                      f"{len(items)} fetched | {new} new")
+            new   = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
+            if new:
+                print(f"[SAM.gov] {label}: {data.get('totalRecords',0)} total | {new} new")
             for item in items:
                 _add(item)
-            time.sleep(0.3)
+            time.sleep(0.5)
+            return True
         except Exception as e:
-            print(f"[SAM.gov] '{title_term}' error: {e}")
+            print(f"[SAM.gov] {label} error: {e}")
+            return True  # non-429 error, keep going
 
-    # ── Title search — Peregrine capability terms (90-day window) ────────────
-    # These are short phrases that appear verbatim in solicitation TITLES.
-    # We use "title" param which is what the SAM.gov v2 API actually supports.
-    # Grouped by Peregrine capability cluster for maintainability.
+    # ── Pass 1: ptype sweeps — last 30 days, all agencies ─────────────────────
+    # 4 calls. Catches everything recently posted.
+    for ptype, label in [("r","Sources Sought"), ("p","Presolicitation"),
+                         ("k","Combined Synopsis"), ("s","Special Notice")]:
+        if not _call({"ptype": ptype, "postedFrom": from_30, "postedTo": to_date}, label):
+            break
+
+    # ── Pass 2: Title searches — 90-day window, high-value terms only ─────────
+    # 11 calls. Catches active opps posted before the 30-day window.
     TITLE_TERMS = [
-        # Data Integration & Unification
-        "data analytics",       "data integration",     "data platform",
-        "data management",      "analytics platform",   "analytics solution",
-        "data unification",     "enterprise data",      "information sharing",
-        # Investigative & Operational Analytics
-        "crime analytics",      "predictive analytics", "situational awareness",
-        "intelligence platform","investigative",        "link analysis",
-        "geospatial analytics", "operational intelligence",
-        # Federated & Enterprise Search
-        "federated search",     "enterprise search",
-        # Entity Resolution
-        "entity resolution",    "record deduplication",
-        # Public Safety & Law Enforcement
-        "law enforcement",      "public safety",        "records management",
-        "computer aided dispatch","crime gun",          "fusion center",
-        "criminal justice",
-        # Corrections & Supervision
-        "community supervision","offender management",  "probation",
-        "corrections",          "supervised release",
-        # Platform Modernization — catches "ATR IT MODERNIZATION" etc.
-        "IT modernization",     "platform modernization","legacy modernization",
-        "digital transformation","palantir",
-        # AI & ML
-        "artificial intelligence","machine learning",   "AI platform",
-        # Secure Gov SaaS
-        "fedramp",              "cjis",
-        # Digital evidence review — added for DOJ DERP and similar
-        "digital evidence",     "evidence review",
-        "evidence analytics",   "evidence management platform",
-        "media review platform","forensic platform",
+        "data analytics",        "data integration",
+        "investigative platform","community supervision",
+        "offender management",   "records management system",
+        "IT modernization",      "artificial intelligence",
+        "federated search",      "entity resolution",
+        "digital evidence",
     ]
     for term in TITLE_TERMS:
-        _search(term, from_90, term)
+        if not _call({"title": term, "postedFrom": from_90, "postedTo": to_date}, f"title='{term}'"):
+            break
 
-    title_count = len(results)
-    print(f"[SAM.gov] Title search (90d): {title_count} unique opportunities")
-
-    # ── ptype sweep — recent RFIs/Sources Sought as safety net (30d) ─────────
-    # Catches well-described opportunities whose titles don't match our terms.
-    for ptype, label in [("r","Sources Sought"), ("p","Presolicitation"),
-                         ("k","Combined Synopsis")]:
-        try:
-            r = requests.get(
-                "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "ptype": ptype,
-                        "postedFrom": from_30, "postedTo": to_date,
-                        "active": "Yes", "limit": 100},
-                headers=HEADERS, timeout=30,
-            )
-            r.raise_for_status()
-            items = r.json().get("opportunitiesData", [])
-            new   = sum(1 for i in items
-                        if (i.get("noticeId") or i.get("id","")) not in seen_ids)
-            print(f"[SAM.gov] ptype={ptype} ({label}): "
-                  f"{len(items)} fetched | {new} new")
-            for item in items:
-                _add(item)
-            time.sleep(0.3)
-        except Exception as e:
-            print(f"[SAM.gov] ptype={ptype} error: {e}")
-
-    sweep_count = len(results) - title_count
-    print(f"[SAM.gov] ptype sweep (30d): {sweep_count} additional unique")
-    print(f"[SAM.gov] Total fetched: {len(results)}")
+    print(f"[SAM.gov] Total: {len(results)} opportunities (ptype sweep + title search)")
     return results
 
 
-# ---------------------------------------------------------------------------
-# SOURCE 2: FEDERAL REGISTER API
-# NO API KEY REQUIRED — completely open
-# Searches for RFI / Sources Sought / Industry Day notices in the Federal Register
-# Docs: https://www.federalregister.gov/reader-aids/developer-resources/rest-api
-# ---------------------------------------------------------------------------
-def fetch_federal_register() -> list[Opportunity]:
-    results = []
-    today = datetime.utcnow()
-    # 30-day window — Federal Register RFIs have longer comment periods
-    since = (today - timedelta(days=10)).strftime("%Y-%m-%d")
-
-    # Short targeted terms — Federal Register search matches title/abstract
-    search_terms = [
-        "data integration",
-        "data analytics law enforcement",
-        "federated search",
-        "entity resolution",
-        "public safety software",
-        "law enforcement platform",
-        "community supervision",
-        "offender management",
-        "corrections data",
-        "palantir",
-        "artificial intelligence law enforcement",
-        "machine learning government",
-        "data platform modernization",
-        "crime analytics",
-        "investigative platform",
-        "situational awareness",
-        "information sharing law enforcement",
-        "cjis",
-        "fedramp data platform",
-    ]
-
-    seen_ids = set()
-
-    for term in search_terms:
-        try:
-            url_params = (
-                f"conditions[term]={requests.utils.quote(term)}"
-                f"&conditions[publication_date][gte]={since}"
-                f"&conditions[type][]=NOTICE"
-                f"&per_page=20&order=newest"
-                f"&fields[]=document_number&fields[]=title&fields[]=abstract"
-                f"&fields[]=publication_date&fields[]=agencies"
-                f"&fields[]=html_url&fields[]=comments_close_on"
-            )
-            resp = requests.get(
-                f"https://www.federalregister.gov/api/v1/documents.json?{url_params}",
-                headers={"User-Agent": HEADERS["User-Agent"]},
-                timeout=30
-            )
-            resp.raise_for_status()
-            docs = resp.json().get("results", [])
-
-            for doc in docs:
-                doc_id = doc.get("document_number", "")
-                if doc_id in seen_ids:
-                    continue
-                seen_ids.add(doc_id)
-
-                title = doc.get("title", "Untitled")
-                abstract = doc.get("abstract", "") or ""
-                agencies = ", ".join(
-                    a.get("name", "") for a in doc.get("agencies", []) if a.get("name")
-                )
-                pub_date = doc.get("publication_date", "")
-                comment_date = doc.get("comments_close_on", doc.get("comment_date", "TBD"))
-                url = clean_url(doc.get("html_url", "") or f"https://www.federalregister.gov/documents/{doc_id}", "https://www.federalregister.gov")
-
-                # Detect if this is actually an RFI/sources sought
-                title_lower = title.lower()
-                abstract_lower = abstract.lower()
-                combined = f"{title_lower} {abstract_lower}"
-
-                rfi_signals = [
-                    "request for information", "sources sought", "industry day",
-                    "market research", "request for proposal", "pre-solicitation",
-                    "notice of intent", "broad agency announcement",
-                ]
-                if not any(sig in combined for sig in rfi_signals):
-                    continue  # Skip non-solicitation notices
-
-                opp_type = "Federal Register RFI"
-                if "industry day" in combined:
-                    opp_type = "Industry Day"
-                elif "sources sought" in combined:
-                    opp_type = "Sources Sought"
-
-                opp = Opportunity(
-                    title=title,
-                    notice_id=f"FR-{doc_id}",
-                    agency=agencies or "Federal Agency",
-                    posted_date=pub_date,
-                    response_date=str(comment_date) if comment_date else "TBD",
-                    description=abstract[:2000],
-                    url=url,
-                    opp_type=opp_type,
-                    source="Federal Register",
-                )
-                results.append(score_opportunity(opp))
-
-            if docs:
-                print(f"[FederalRegister] '{term}': {len(docs)} raw, kept {len([x for x in results if x.notice_id.startswith('FR-')])} after filter")
-            time.sleep(0.3)
-        except Exception as e:
-            status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
-            print(f"[FederalRegister] Error for '{term}': {type(e).__name__}: {e} (HTTP {status})")
-
-    print(f"[Federal Register] {len(results)} notices fetched")
-    return results
 
 
-# ---------------------------------------------------------------------------
-# SOURCE 3: USASPENDING.GOV API v2
-# NO API KEY REQUIRED — completely open
-# Use case: competitive intelligence — find recent contracts in our NAICS space
-# so we know who's spending, on what, and can pursue follow-on/recompete opps
-# ---------------------------------------------------------------------------
-def fetch_usaspending_intel() -> list[Opportunity]:
+# Shared rate-limit flag — set to True when SAM.gov returns 429
+# All SAM.gov callers check this before making requests
+_SAM_RATE_LIMITED = [False]
+
+
+def _sam_call(params: dict, label: str, seen_ids: set, results: list) -> bool:
     """
-    Searches USASpending.gov for recent contract awards — competitive intel.
-    Shows who is spending in Peregrine's space, at which agencies, so you can
-    identify recompete opportunities and warm target accounts.
-    NO NAICS filter — too restrictive. Short single keywords only.
+    Single SAM.gov API call with rate-limit guard.
+    Returns False if rate limited (stop further calls), True otherwise.
+    Adds scored Opportunity objects to results, deduplicates via seen_ids.
     """
-    results = []
-    today = datetime.utcnow()
-    # Use fiscal year to date for broader coverage
-    start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
-    end_date = today.strftime("%Y-%m-%d")
-
-    # ONE keyword per batch — short terms that actually appear in award descriptions
-    # Multi-word phrases like "law enforcement analytics" almost never match
-    keyword_batches = [
-        ["law enforcement software"],
-        ["public safety platform"],
-        ["data integration"],
-        ["crime analytics"],
-        ["community supervision"],
-        ["offender management"],
-        ["investigative software"],
-        ["palantir"],
-        ["data analytics platform"],
-        ["records management system"],
-        ["criminal justice software"],
-        ["corrections software"],
-    ]
-
-    for keywords in keyword_batches:
-        payload = {
-            "subawards": False,
-            "limit": 10,
-            "page": 1,
-            "filters": {
-                "keywords": keywords,
-                "award_type_codes": ["A", "B", "C", "D"],
-                "time_period": [{"start_date": start_date, "end_date": end_date}],
-                # NO naics_codes filter — it kills results
-            },
-            "fields": [
-                "Award ID", "Recipient Name", "Start Date", "End Date",
-                "Award Amount", "Awarding Agency", "Awarding Sub Agency",
-                "Description", "Contract Award Type",
-            ],
-            "sort": "Award Amount",
-            "order": "desc",
-        }
-
-        try:
-            resp = requests.post(
-                "https://api.usaspending.gov/api/v2/search/spending_by_award/",
-                json=payload,
-                headers={**HEADERS, "Content-Type": "application/json"},
-                timeout=30
-            )
-            resp.raise_for_status()
-            awards = resp.json().get("results", [])
-
-            for award in awards:
-                award_id = award.get("Award ID", "")
-                amount = award.get("Award Amount", 0) or 0
-                recipient = award.get("Recipient Name", "Unknown Contractor")
-                agency = award.get("Awarding Agency", "")
-                sub_agency = award.get("Awarding Sub Agency", "")
-                description = award.get("Description", "") or ""
-                start = award.get("Start Date", "")
-                end = award.get("End Date", "")
-
-                # Format as competitive intel, not a live solicitation
-                title = f"[AWARD INTEL] {description[:80] or 'Contract'} — {recipient}"
-                desc_full = (
-                    f"Recent award to {recipient} by {agency} ({sub_agency}). "
-                    f"Contract value: ${amount:,.0f}. Period: {start} to {end}. "
-                    f"Description: {description[:500]}. "
-                    f"COMPETITIVE INTEL: This agency has active spending in this space. "
-                    f"Watch for recompetes or follow-on opportunities."
-                )
-
-                opp = Opportunity(
-                    title=title,
-                    notice_id=f"USA-{award_id}",
-                    agency=f"{agency} / {sub_agency}",
-                    posted_date=start or end_date,
-                    response_date="Watch for recompete",
-                    description=desc_full,
-                    url=clean_url(f"https://www.usaspending.gov/award/{award_id}/", "https://www.usaspending.gov/search"),
-                    opp_type="Award Intel",
-                    source="USASpending.gov",
-                )
-                results.append(score_opportunity(opp))
-
-            print(f"[USASpending] {keywords}: {len(awards)} awards returned")
-            time.sleep(0.5)
-        except Exception as e:
-            status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
-            print(f"[USASpending] Error for {keywords}: {type(e).__name__}: {e} (HTTP {status})")
-
-    print(f"[USASpending] {len(results)} award intel records fetched")
-    return results
+    if _SAM_RATE_LIMITED[0]:
+        return False
+    try:
+        r = requests.get(
+            "https://api.sam.gov/opportunities/v2/search",
+            params={"api_key": SAM_API_KEY, "active": "Yes", "limit": 100, **params},
+            headers=HEADERS, timeout=30,
+        )
+        if r.status_code == 429:
+            print(f"[SAM.gov] RATE LIMIT — stopping all SAM.gov calls for today ({label})")
+            _SAM_RATE_LIMITED[0] = True
+            return False
+        r.raise_for_status()
+        data  = r.json()
+        items = data.get("opportunitiesData", [])
+        new   = 0
+        for item in items:
+            nid = item.get("noticeId") or item.get("id") or ""
+            if not nid or nid in seen_ids:
+                continue
+            seen_ids.add(nid)
+            new += 1
+            results.append(score_opportunity(Opportunity(
+                title         = item.get("title", "Untitled"),
+                notice_id     = nid,
+                agency        = item.get("fullParentPathName") or item.get("departmentName") or "Unknown",
+                posted_date   = item.get("postedDate", ""),
+                response_date = item.get("responseDeadLine", "TBD"),
+                description   = (item.get("description") or "")[:2000],
+                url           = clean_url(f"https://sam.gov/opp/{nid}/view", "https://sam.gov/search"),
+                opp_type      = item.get("type") or "Notice",
+                source        = "SAM.gov",
+                naics         = item.get("naicsCode", ""),
+            )))
+        if new:
+            print(f"[SAM.gov] {label}: {data.get('totalRecords',0)} total | {new} new")
+        time.sleep(0.5)
+        return True
+    except Exception as e:
+        print(f"[SAM.gov] {label} error: {e}")
+        return True  # non-429 errors: keep going
 
 
-# ---------------------------------------------------------------------------
-# SOURCE: DOJ & DHS TARGETED SEARCHES
-# Run capability title searches scoped to DOJ and DHS specifically.
-# The general SAM fetch returns max 100 results per keyword — by scoping to
-# DOJ/DHS we get the full DOJ/DHS result set for each term, not diluted by
-# all other agencies. Uses deptname= param (partial match, case insensitive).
-# ---------------------------------------------------------------------------
+# DOJ agencies — official org names as they appear in SAM.gov
+DOJ_ORGS = [
+    "Department of Justice",
+    "Alcohol, Tobacco, Firearms",         # ATF
+    "Federal Bureau of Investigation",    # FBI
+    "Drug Enforcement Administration",    # DEA
+    "United States Marshals",             # USMS
+    "Bureau of Prisons",                  # BOP
+    "Office of Justice Programs",         # OJP
+    "Court Services and Offender",        # CSOSA
+    "Community Oriented Policing",        # COPS
+    "Executive Office for United States Attorneys",
+    "National Security Division",
+]
 
-# Capability terms most relevant to DOJ/DHS specifically
-# Targeted terms for DOJ/DHS agency-specific searches.
-# Kept SHORT to stay within SAM.gov 1,000 calls/day limit.
-# General broad terms (data analytics, IT modernization, etc.) are already
-# covered by fetch_sam_gov — these focus on agency-specific signals.
-DOJ_DHS_TERMS = [
-    "data analytics",        "data integration",
-    "investigative platform","intelligence platform",
-    "community supervision", "offender management",
-    "records management",    "IT modernization",
-    "artificial intelligence","digital evidence",
-]  # 10 terms × (1 parent + N sub-agencies) ≤ ~300 calls total
+# DHS agencies — official org names as they appear in SAM.gov
+DHS_ORGS = [
+    "Homeland Security",                  # DHS parent
+    "Customs and Border Protection",      # CBP
+    "Immigration and Customs Enforcement",# ICE
+    "Coast Guard",                        # USCG
+    "Cybersecurity and Infrastructure",   # CISA
+    "Federal Emergency Management",       # FEMA
+    "Transportation Security Administration",
+    "Secret Service",                     # USSS
+    "Citizenship and Immigration Services",# USCIS
+    "Federal Law Enforcement Training",   # FLETC
+]
 
-
-def fetch_agency_targeted(dept_short: str, deptname_filter: str) -> list[Opportunity]:
-    """
-    Title search scoped to a specific department via deptname= filter.
-    dept_short: label for logging (e.g. "DOJ", "DHS")
-    deptname_filter: partial dept name SAM.gov will match against
-                     (e.g. "justice", "homeland")
-    """
-    if not SAM_API_KEY:
-        return []
-
-    results  = []
-    seen_ids = set()
-    today    = datetime.utcnow()
-    to_date  = today.strftime("%m/%d/%Y")
-    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
-
-    def _add(item):
-        nid = item.get("noticeId") or item.get("id") or ""
-        if not nid or nid in seen_ids:
-            return
-        seen_ids.add(nid)
-        results.append(score_opportunity(Opportunity(
-            title         = item.get("title", "Untitled"),
-            notice_id     = nid,
-            agency        = item.get("fullParentPathName") or item.get("departmentName") or dept_short,
-            posted_date   = item.get("postedDate", ""),
-            response_date = item.get("responseDeadLine", "TBD"),
-            description   = (item.get("description") or "")[:2000],
-            url           = clean_url(f"https://sam.gov/opp/{nid}/view", "https://sam.gov/search"),
-            opp_type      = item.get("type") or "Notice",
-            source        = "SAM.gov",
-            naics         = item.get("naicsCode", ""),
-        )))
-
-    total_new = 0
-    for term in DOJ_DHS_TERMS:
-        for attempt in range(3):
-            try:
-                r = requests.get(
-                    "https://api.sam.gov/opportunities/v2/search",
-                    params={
-                        "api_key":          SAM_API_KEY,
-                        "title":            term,
-                        "organizationName": deptname_filter,
-                        "postedFrom":       from_90,
-                        "postedTo":         to_date,
-                        "active":           "Yes",
-                        "limit":            100,
-                    },
-                    headers=HEADERS, timeout=30,
-                )
-                if r.status_code == 429:
-                    wait = 30 * (attempt + 1)
-                    print(f"[{dept_short}] Rate limited on '{term}' — waiting {wait}s")
-                    time.sleep(wait)
-                    continue
-                r.raise_for_status()
-                data  = r.json()
-                items = data.get("opportunitiesData", [])
-                new   = sum(1 for i in items if (i.get("noticeId","")) not in seen_ids)
-                if new:
-                    total_new += new
-                    print(f"[{dept_short}] title='{term}': {data.get('totalRecords',0)} total, {new} new")
-                for item in items:
-                    _add(item)
-                time.sleep(0.4)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    time.sleep(15)
-                else:
-                    print(f"[{dept_short}] '{term}' error: {e}")
-
-    print(f"[{dept_short}] Total: {len(results)} opportunities ({total_new} unique from dept filter)")
-    return results
+# High-value title terms for agency-targeted searches
+# Kept to 8 terms to stay well within 1,000/day API limit:
+# 8 terms × (11 DOJ + 10 DHS orgs) = 168 calls
+AGENCY_TITLE_TERMS = [
+    "data analytics",
+    "data integration",
+    "investigative platform",
+    "community supervision",
+    "records management",
+    "IT modernization",
+    "artificial intelligence",
+    "digital evidence",
+]
 
 
 def fetch_doj_opportunities() -> list[Opportunity]:
-    """
-    DOJ-scoped title search.
-    Searches the parent DOJ umbrella AND key sub-agency names.
-    """
-    results  = []
-    seen_ids = set()
-
-    for opp in fetch_agency_targeted("DOJ", "Department of Justice"):
-        key = opp.notice_id or opp.title[:60].lower()
-        if key not in seen_ids:
-            seen_ids.add(key)
-            results.append(opp)
-
-    doj_sub_agencies = [
-        # Law enforcement bureaus
-        ("ATF",     "Alcohol Tobacco Firearms"),
-        ("FBI",     "Federal Bureau of Investigation"),
-        ("DEA",     "Drug Enforcement Administration"),
-        ("USMS",    "United States Marshals"),
-        # Corrections
-        ("BOP",     "Bureau of Prisons"),
-        ("FPI",     "Federal Prison Industries"),
-        # Grant-making / justice programs
-        ("OJP",     "Office of Justice Programs"),
-        ("BJA",     "Bureau of Justice Assistance"),
-        ("BJS",     "Bureau of Justice Statistics"),
-        ("NIJ",     "National Institute of Justice"),
-        ("OJJDP",   "Juvenile Justice"),
-        ("COPS",    "Community Oriented Policing"),
-        ("OVW",     "Violence Against Women"),
-        # Supervision / courts
-        ("CSOSA",   "Court Services and Offender"),
-        ("EOUSA",   "Executive Office for United States Attorneys"),
-        # Litigating / national security divisions
-        ("NSD",     "National Security Division"),
-        ("CRIMINAL","Criminal Division"),
-        ("EOIRF",   "Executive Office for Immigration Review"),
-        # Justice Management
-        ("JMD",     "Justice Management Division"),
-    ]
-    for label, org_name in doj_sub_agencies:
-        for opp in fetch_agency_targeted(f"DOJ/{label}", org_name):
-            key = opp.notice_id or opp.title[:60].lower()
-            if key not in seen_ids:
-                seen_ids.add(key)
-                results.append(opp)
-
-    print(f"[DOJ] Combined total: {len(results)} unique opportunities")
+    """DOJ + all sub-agencies: title search for Peregrine capability terms."""
+    if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
+        return []
+    results, seen_ids = [], set()
+    today    = datetime.utcnow()
+    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    to_date  = today.strftime("%m/%d/%Y")
+    for org in DOJ_ORGS:
+        for term in AGENCY_TITLE_TERMS:
+            if _SAM_RATE_LIMITED[0]:
+                break
+            _sam_call({"title": term, "organizationName": org,
+                       "postedFrom": from_90, "postedTo": to_date},
+                      f"DOJ/{org[:20]}/'{term}'", seen_ids, results)
+        if _SAM_RATE_LIMITED[0]:
+            break
+    print(f"[DOJ] {len(results)} unique opportunities")
     return results
 
 
 def fetch_dhs_opportunities() -> list[Opportunity]:
-    """
-    DHS-scoped title search.
-    Searches both the parent dept name AND key sub-agency names since
-    some DHS components appear under their own org names in SAM.gov.
-    """
-    results  = []
-    seen_ids = set()
-
-    # Primary: search under "Homeland Security" umbrella
-    for opp in fetch_agency_targeted("DHS", "Homeland Security"):
-        key = opp.notice_id or opp.title[:60].lower()
-        if key not in seen_ids:
-            seen_ids.add(key)
-            results.append(opp)
-
-    # Also search key sub-agencies by their standalone names
-    dhs_sub_agencies = [
-        # Border & enforcement
-        ("CBP",    "Customs and Border Protection"),
-        ("ICE",    "Immigration and Customs Enforcement"),
-        ("HSI",    "Homeland Security Investigations"),
-        # Maritime & military
-        ("USCG",   "Coast Guard"),
-        # Cybersecurity & infrastructure
-        ("CISA",   "Cybersecurity and Infrastructure Security"),
-        # Emergency management
-        ("FEMA",   "Federal Emergency Management"),
-        # Transportation
-        ("TSA",    "Transportation Security Administration"),
-        # Protection
-        ("USSS",   "Secret Service"),
-        # Immigration services
-        ("USCIS",  "Citizenship and Immigration Services"),
-        # Training
-        ("FLETC",  "Federal Law Enforcement Training"),
-        # Intelligence
-        ("IA",     "Intelligence and Analysis"),
-        # Science & Technology
-        ("ST",     "Science and Technology Directorate"),
-        # Management
-        ("MGMT",   "Management Directorate"),
-    ]
-    for label, org_name in dhs_sub_agencies:
-        for opp in fetch_agency_targeted(f"DHS/{label}", org_name):
-            key = opp.notice_id or opp.title[:60].lower()
-            if key not in seen_ids:
-                seen_ids.add(key)
-                results.append(opp)
-
-    print(f"[DHS] Combined total: {len(results)} unique opportunities")
+    """DHS + all sub-agencies: title search for Peregrine capability terms."""
+    if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
+        return []
+    results, seen_ids = [], set()
+    today    = datetime.utcnow()
+    from_90  = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    to_date  = today.strftime("%m/%d/%Y")
+    for org in DHS_ORGS:
+        for term in AGENCY_TITLE_TERMS:
+            if _SAM_RATE_LIMITED[0]:
+                break
+            _sam_call({"title": term, "organizationName": org,
+                       "postedFrom": from_90, "postedTo": to_date},
+                      f"DHS/{org[:20]}/'{term}'", seen_ids, results)
+        if _SAM_RATE_LIMITED[0]:
+            break
+    print(f"[DHS] {len(results)} unique opportunities")
     return results
 
 
-# ---------------------------------------------------------------------------
-# SOURCE 4: DHS, DOJ, FBI PROCUREMENT PAGES (RSS / ATOM FEEDS)
-# Several agencies publish RSS feeds of procurement opportunities
-# NO KEY REQUIRED
-# ---------------------------------------------------------------------------
+
 def fetch_agency_rss_feeds() -> list[Opportunity]:
     results = []
 
