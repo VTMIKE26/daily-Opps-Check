@@ -564,6 +564,7 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
 # ---------------------------------------------------------------------------
 
 _SAM_RATE_LIMITED = [False]  # global flag — stops all SAM calls on 429
+_SAM_RESULTS_CACHE: list = []  # shared cache — DOJ/DHS filter from this
 
 def _sam_search(extra_params: dict, label: str,
                 seen_ids: set, results: list) -> bool:
@@ -639,7 +640,10 @@ def fetch_sam_gov() -> list[Opportunity]:
                            f"title={term}", seen_ids, results):
             break
 
-    print(f"[SAM.gov] {len(results)} opportunities")
+    # Cache results so DOJ/DHS can filter without extra API calls
+    _SAM_RESULTS_CACHE.clear()
+    _SAM_RESULTS_CACHE.extend(results)
+    print(f"[SAM.gov] {len(results)} opportunities (cached for DOJ/DHS filtering)")
     return results
 
 
@@ -726,19 +730,26 @@ def _is_dhs(path: str) -> bool:
 
 def fetch_doj_opportunities() -> list[Opportunity]:
     """
-    DOJ opportunities: runs DOJ-specific title searches (no org filter),
-    then post-filters results by fullParentPathName containing DOJ agency names.
-    Zero organizationName calls — avoids the broken SAM.gov filter param.
+    Filter SAM.gov cache for DOJ agency opportunities.
+    Zero additional API calls — uses results already fetched by fetch_sam_gov.
+    Falls back to targeted API calls if cache is empty.
     """
+    # First pass: filter from cache (free)
+    from_cache = [o for o in _SAM_RESULTS_CACHE if _is_doj(o.agency)]
+    if from_cache:
+        print(f"[DOJ] {len(from_cache)} opportunities (from SAM cache)")
+        return from_cache
+
+    # Fallback: direct API calls if cache empty (e.g. SAM.gov skipped)
     if not SAM_API_KEY:
         return []
-    _SAM_RATE_LIMITED[0] = False  # reset so prior rate limit doesn't block
+    _SAM_RATE_LIMITED[0] = False
     results, seen_ids = [], set()
     today   = datetime.utcnow()
     to_date = today.strftime("%m/%d/%Y")
     d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
 
-    for term in AGENCY_SEARCH_TERMS:
+    for term in AGENCY_SEARCH_TERMS[:10]:  # limit fallback calls
         if _SAM_RATE_LIMITED[0]:
             break
         try:
@@ -761,31 +772,35 @@ def fetch_doj_opportunities() -> list[Opportunity]:
                     continue
                 seen_ids.add(nid)
                 results.append(score_opportunity(Opportunity(
-                    title         = item.get("title", "Untitled"),
-                    notice_id     = nid,
-                    agency        = path,
-                    posted_date   = item.get("postedDate", ""),
-                    response_date = item.get("responseDeadLine", "TBD"),
-                    description   = (item.get("description") or "")[:2000],
-                    url           = clean_url(f"https://sam.gov/opp/{nid}/view",
-                                              "https://sam.gov/search"),
-                    opp_type      = item.get("type") or "Notice",
-                    source        = "SAM.gov",
-                    naics         = item.get("naicsCode", ""),
+                    title=item.get("title","Untitled"), notice_id=nid,
+                    agency=path, posted_date=item.get("postedDate",""),
+                    response_date=item.get("responseDeadLine","TBD"),
+                    description=(item.get("description") or "")[:2000],
+                    url=clean_url(f"https://sam.gov/opp/{nid}/view","https://sam.gov/search"),
+                    opp_type=item.get("type") or "Notice", source="SAM.gov",
+                    naics=item.get("naicsCode",""),
                 )))
             time.sleep(0.2)
         except Exception as e:
-            print(f"[DOJ] '{term}': {e}")
+            print(f"[DOJ fallback] '{term}': {e}")
 
-    print(f"[DOJ] {len(results)} opportunities from targeted title search")
+    print(f"[DOJ] {len(results)} opportunities (fallback API calls)")
     return results
 
 
 def fetch_dhs_opportunities() -> list[Opportunity]:
     """
-    DHS opportunities: same approach as DOJ — title searches, post-filter
-    by fullParentPathName. No broken organizationName filter.
+    Filter SAM.gov cache for DHS agency opportunities.
+    Zero additional API calls — uses results already fetched by fetch_sam_gov.
+    Falls back to targeted API calls if cache is empty.
     """
+    # First pass: filter from cache (free)
+    from_cache = [o for o in _SAM_RESULTS_CACHE if _is_dhs(o.agency)]
+    if from_cache:
+        print(f"[DHS] {len(from_cache)} opportunities (from SAM cache)")
+        return from_cache
+
+    # Fallback: direct API calls if cache empty
     if not SAM_API_KEY:
         return []
     _SAM_RATE_LIMITED[0] = False
@@ -794,7 +809,7 @@ def fetch_dhs_opportunities() -> list[Opportunity]:
     to_date = today.strftime("%m/%d/%Y")
     d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
 
-    for term in AGENCY_SEARCH_TERMS:
+    for term in AGENCY_SEARCH_TERMS[:10]:
         if _SAM_RATE_LIMITED[0]:
             break
         try:
@@ -817,25 +832,20 @@ def fetch_dhs_opportunities() -> list[Opportunity]:
                     continue
                 seen_ids.add(nid)
                 results.append(score_opportunity(Opportunity(
-                    title         = item.get("title", "Untitled"),
-                    notice_id     = nid,
-                    agency        = path,
-                    posted_date   = item.get("postedDate", ""),
-                    response_date = item.get("responseDeadLine", "TBD"),
-                    description   = (item.get("description") or "")[:2000],
-                    url           = clean_url(f"https://sam.gov/opp/{nid}/view",
-                                              "https://sam.gov/search"),
-                    opp_type      = item.get("type") or "Notice",
-                    source        = "SAM.gov",
-                    naics         = item.get("naicsCode", ""),
+                    title=item.get("title","Untitled"), notice_id=nid,
+                    agency=path, posted_date=item.get("postedDate",""),
+                    response_date=item.get("responseDeadLine","TBD"),
+                    description=(item.get("description") or "")[:2000],
+                    url=clean_url(f"https://sam.gov/opp/{nid}/view","https://sam.gov/search"),
+                    opp_type=item.get("type") or "Notice", source="SAM.gov",
+                    naics=item.get("naicsCode",""),
                 )))
             time.sleep(0.2)
         except Exception as e:
-            print(f"[DHS] '{term}': {e}")
+            print(f"[DHS fallback] '{term}': {e}")
 
-    print(f"[DHS] {len(results)} opportunities from targeted title search")
+    print(f"[DHS] {len(results)} opportunities (fallback API calls)")
     return results
-
 
 def fetch_federal_register() -> list[Opportunity]:
     """Search Federal Register for RFI/Sources Sought notices (10-day window)."""
@@ -2389,56 +2399,67 @@ def build_competitor_section(intel_items: list, growth_items: list = None) -> st
         for comp in item["competitor"].split(", "):
             grouped[comp.strip()].append(item)
 
-    # Split recompetes from news stories
-    recompetes = sorted(
-        [i for i in intel_items if i.get("is_recompete")],
+    # Split: Palantir recompetes | other recompetes | news stories
+    palantir_recompetes = sorted(
+        [i for i in intel_items if i.get("is_recompete") and "Palantir" in i.get("competitor","")],
+        key=lambda x: x.get("days_left", 999)
+    )
+    other_recompetes = sorted(
+        [i for i in intel_items if i.get("is_recompete") and "Palantir" not in i.get("competitor","")],
         key=lambda x: x.get("days_left", 999)
     )
     news_stories = [i for i in intel_items if not i.get("is_recompete")]
 
-    # ── Palantir recompete section ────────────────────────────────────────────
-    recompete_html = ""
-    if recompetes:
-        rc_rows = ""
-        for rc in recompetes[:8]:
-            link = ('<a href="' + rc["url"] + '" style="font-weight:700;color:#c0392b;text-decoration:none;">' + rc["title"][:120] + '</a>') if rc.get("url") else ('<span style="font-weight:700;color:#c0392b;">' + rc["title"][:120] + '</span>')
-            rc_rows += f"""
+    def _rc_rows(recompetes_list):
+        rows = ""
+        for rc in recompetes_list[:8]:
+            link = (f'<a href="{rc["url"]}" style="font-weight:700;color:#c0392b;text-decoration:none;">{rc["title"][:120]}</a>'
+                    if rc.get("url") else f'<span style="font-weight:700;color:#c0392b;">{rc["title"][:120]}</span>')
+            rows += f"""
             <div style="border-left:3px solid #c0392b;padding:8px 10px;margin-bottom:8px;background:#fff9f9;border-radius:0 4px 4px 0;">
               <div style="font-size:13px;">{link}</div>
               <div style="font-size:11px;color:#888;margin-top:2px;">Expires: {rc['date']} · {rc['source']}</div>
               {f'<div style="font-size:12px;color:#555;margin-top:3px;">{rc.get("summary","")[:200]}</div>' if rc.get("summary") else ''}
             </div>"""
-        # Build competitor breakdown for header
-        comp_counts = {}
-        for rc in recompetes:
-            name = rc["competitor"].replace(" — Recompete Alert", "")
-            comp_counts[name] = comp_counts.get(name, 0) + 1
-        comp_summary = ", ".join(f"{n} ({c})" for n, c in sorted(comp_counts.items()))
-        recompete_html = f"""
-        <div style="margin-bottom:16px;">
-          <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
-            🎯 Competitor Recompete Opportunities ({len(recompetes)} expiring contracts)
-          </div>
-          <p style="font-size:12px;color:#666;margin:0 0 8px;">Expiring contracts — displacement opportunities for Peregrine: {comp_summary}</p>
-          {{rc_rows}}
-        </div>"""
-        recompete_html = recompete_html.format(rc_rows=rc_rows)
+        return rows
 
-    # ── News stories by competitor ────────────────────────────────────────────
+    # ── Palantir section (own block) ──────────────────────────────────────────
+    palantir_html = ""
+    if palantir_recompetes:
+        palantir_html = f"""
+        <div style="margin-bottom:16px;border:1px solid #f5c6cb;border-radius:8px;padding:14px;background:#fff9f9;">
+          <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
+            🎯 Palantir Recompete Opportunities ({len(palantir_recompetes)} expiring)
+          </div>
+          <p style="font-size:12px;color:#666;margin:0 0 8px;">Active Palantir contracts expiring within 12 months — direct displacement opportunities for Peregrine.</p>
+          {_rc_rows(palantir_recompetes)}
+        </div>"""
+
+    # ── Other competitor recompetes ───────────────────────────────────────────
+    other_rc_html = ""
+    if other_recompetes:
+        other_rc_html = f"""
+        <div style="margin-bottom:16px;">
+          <div style="font-weight:700;font-size:13px;color:#e67e22;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
+            ⚡ Other Competitor Recompetes ({len(other_recompetes)} expiring)
+          </div>
+          {_rc_rows(other_recompetes)}
+        </div>"""
+
+    # ── News stories — max 2 per competitor ──────────────────────────────────
     news_rows = ""
     if news_stories:
         from collections import defaultdict
-        grouped_news = defaultdict(list)
+        grouped = defaultdict(list)
         for item in news_stories:
-            for comp in item["competitor"].split(", "):
-                grouped_news[comp.strip()].append(item)
-
-        for comp_name in sorted(grouped_news.keys()):
-            stories = grouped_news[comp_name][:3]
+            grouped[item["competitor"]].append(item)
+        for comp_name in sorted(grouped.keys()):
+            stories = grouped[comp_name][:2]  # max 2 per competitor
             story_html = ""
             for s in stories:
-                link = ('<a href="' + s["url"] + '" style="color:#0057b8;text-decoration:none;font-weight:600;">' + s["title"][:90] + '</a>') if s.get("url") else ('<span style="font-weight:600;color:#333;">' + s["title"][:90] + '</span>')
-                summary = s.get("summary", "")[:200]
+                link = (f'<a href="{s["url"]}" style="color:#0057b8;text-decoration:none;font-weight:600;">{s["title"][:90]}</a>'
+                        if s.get("url") else f'<span style="font-weight:600;color:#333;">{s["title"][:90]}</span>')
+                summary = s.get("summary","")[:200]
                 story_html += f"""
                 <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #f0f0f0;">
                   <div style="font-size:13px;">{link}</div>
@@ -2447,18 +2468,20 @@ def build_competitor_section(intel_items: list, growth_items: list = None) -> st
                 </div>"""
             news_rows += f"""
             <div style="margin-bottom:14px;">
-              <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">⚔️ {comp_name}</div>
+              <div style="font-weight:700;font-size:12px;color:#555;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">⚔️ {comp_name}</div>
               {story_html}
             </div>"""
 
-    total = len(recompetes) + len(news_stories)
+    total = len(palantir_recompetes) + len(other_recompetes) + len(news_stories)
     return f"""
     <div style="margin:20px 0 6px">
       <h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;padding-bottom:5px;">🔎 Competitor Intelligence ({total} signals)</h2>
       <p style="font-size:12px;color:#888;margin:0 0 12px;">Monitoring: {", ".join(c["name"] for c in COMPETITORS)}</p>
-      {recompete_html}
-      {news_rows if news_rows else '<p style="color:#aaa;font-size:13px;font-style:italic">No competitor news stories today.</p>'}
+      {palantir_html}
+      {other_rc_html}
+      {news_rows if news_rows else '<p style="color:#aaa;font-size:13px;font-style:italic">No competitor news today.</p>'}
     </div>"""
+
 
 
 # ---------------------------------------------------------------------------
