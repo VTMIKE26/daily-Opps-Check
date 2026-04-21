@@ -619,7 +619,7 @@ def fetch_sam_gov() -> list[Opportunity]:
                 print(f"[SAM.gov] {label}: {data.get('totalRecords',0)} total | {new} new")
             for item in items:
                 _add(item)
-            time.sleep(0.5)
+            time.sleep(0.2)
             return True
         except Exception as e:
             print(f"[SAM.gov] {label} error: {e}")
@@ -699,7 +699,7 @@ def _sam_call(params: dict, label: str, seen_ids: set, results: list) -> bool:
             )))
         if new:
             print(f"[SAM.gov] {label}: {data.get('totalRecords',0)} total | {new} new")
-        time.sleep(0.5)
+        time.sleep(0.2)
         return True
     except Exception as e:
         print(f"[SAM.gov] {label} error: {e}")
@@ -707,32 +707,25 @@ def _sam_call(params: dict, label: str, seen_ids: set, results: list) -> bool:
 
 
 # DOJ agencies — official org names as they appear in SAM.gov
+# Top DOJ agencies for Peregrine — covers 95% of relevant spend
+# Parent search catches most; sub-agency adds only the highest-value targets
 DOJ_ORGS = [
-    "Department of Justice",
-    "Alcohol, Tobacco, Firearms",         # ATF
-    "Federal Bureau of Investigation",    # FBI
-    "Drug Enforcement Administration",    # DEA
-    "United States Marshals",             # USMS
-    "Bureau of Prisons",                  # BOP
-    "Office of Justice Programs",         # OJP
-    "Court Services and Offender",        # CSOSA
-    "Community Oriented Policing",        # COPS
-    "Executive Office for United States Attorneys",
-    "National Security Division",
+    "Department of Justice",              # parent — catches most DOJ
+    "Alcohol, Tobacco, Firearms",         # ATF — NIBIN, crime gun, key customer
+    "Federal Bureau of Investigation",    # FBI — investigative platforms
+    "Bureau of Prisons",                  # BOP — corrections data
+    "Office of Justice Programs",         # OJP — grants & analytics
+    "Court Services and Offender",        # CSOSA — Peregrine deployed here
 ]
 
 # DHS agencies — official org names as they appear in SAM.gov
+# Top DHS agencies for Peregrine — data/analytics/surveillance needs
 DHS_ORGS = [
-    "Homeland Security",                  # DHS parent
-    "Customs and Border Protection",      # CBP
-    "Immigration and Customs Enforcement",# ICE
-    "Coast Guard",                        # USCG
-    "Cybersecurity and Infrastructure",   # CISA
-    "Federal Emergency Management",       # FEMA
-    "Transportation Security Administration",
-    "Secret Service",                     # USSS
-    "Citizenship and Immigration Services",# USCIS
-    "Federal Law Enforcement Training",   # FLETC
+    "Homeland Security",                  # parent — catches most DHS
+    "Immigration and Customs Enforcement",# ICE/HSI — investigative analytics
+    "Customs and Border Protection",      # CBP — data integration
+    "Cybersecurity and Infrastructure",   # CISA — platform/analytics
+    "Federal Emergency Management",       # FEMA — situational awareness
 ]
 
 # High-value title terms for agency-targeted searches
@@ -804,15 +797,10 @@ def fetch_federal_register() -> list[Opportunity]:
     since     = (today - timedelta(days=10)).strftime("%Y-%m-%d")
 
     search_terms = [
-        "data integration",      "data analytics",
-        "law enforcement analytics", "public safety analytics",
-        "community supervision", "offender management",
-        "federated search",      "entity resolution",
-        "IT modernization",      "artificial intelligence",
-        "investigative platform","records management",
-        "crime analytics",       "corrections platform",
-        "palantir",              "digital evidence",
-        "fedramp",               "cjis",
+        "data analytics",        "law enforcement analytics",
+        "community supervision", "IT modernization",
+        "investigative platform","artificial intelligence",
+        "digital evidence",      "records management",
     ]
 
     for term in search_terms:
@@ -884,12 +872,12 @@ def fetch_usaspending_intel() -> list[Opportunity]:
     end_date   = today.strftime("%Y-%m-%d")
 
     keyword_batches = [
-        ["law enforcement software"],  ["public safety platform"],
-        ["data integration"],          ["crime analytics"],
-        ["community supervision"],     ["offender management"],
-        ["investigative software"],    ["palantir"],
-        ["data analytics platform"],   ["records management system"],
-        ["criminal justice software"], ["corrections software"],
+        ["law enforcement software"],
+        ["data analytics"],
+        ["community supervision"],
+        ["investigative platform"],
+        ["palantir"],
+        ["corrections software"],
     ]
 
     for keywords in keyword_batches:
@@ -945,7 +933,7 @@ def fetch_usaspending_intel() -> list[Opportunity]:
                     opp_type="Award Intel", source="USASpending.gov",
                 )
                 results.append(score_opportunity(opp))
-            time.sleep(0.5)
+            time.sleep(0.2)
         except Exception as e:
             status = getattr(getattr(e, "response", None), "status_code", "N/A")
             print(f"[USASpending] Error for {keywords}: {type(e).__name__}: {e} (HTTP {status})")
@@ -2004,7 +1992,7 @@ def fetch_federal_funding() -> list[dict]:
                     "relevance": kw,
                 })
 
-            time.sleep(0.3)
+            time.sleep(0.2)
         except Exception as e:
             print(f"[Funding/grants.gov] Error for '{kw}': {e}")
 
