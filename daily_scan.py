@@ -643,40 +643,148 @@ def fetch_sam_gov() -> list[Opportunity]:
     return results
 
 
+
+# DOJ agency path fragments — match against fullParentPathName
+DOJ_PATH_FRAGMENTS = [
+    "department of justice", "dept of justice",
+    "alcohol, tobacco", "atf",
+    "federal bureau of investigation", "fbi",
+    "drug enforcement administration", "dea",
+    "bureau of prisons", "bop",
+    "office of justice programs", "ojp",
+    "court services and offender", "csosa",
+    "community oriented policing", "cops office",
+    "u.s. marshals", "marshals service",
+    "executive office for united states attorneys",
+    "national security division",
+]
+
+# DHS agency path fragments
+DHS_PATH_FRAGMENTS = [
+    "homeland security", "dhs",
+    "customs and border protection", "cbp",
+    "immigration and customs enforcement", "ice",
+    "coast guard", "uscg",
+    "cybersecurity and infrastructure", "cisa",
+    "federal emergency management", "fema",
+    "transportation security administration", "tsa",
+    "secret service", "usss",
+    "citizenship and immigration services", "uscis",
+    "federal law enforcement training", "fletc",
+]
+
+# Unified capability terms for DOJ and DHS searches.
+# Covers all 9 Peregrine capability clusters. Both agencies use the same list
+# so no opportunities are missed due to agency-specific term gaps.
+AGENCY_SEARCH_TERMS = [
+    # ── Data Integration & Unification ────────────────────────────────────────
+    "data integration",          "data analytics platform",
+    "data management platform",  "enterprise data platform",
+    "data unification",          "information sharing platform",
+    # ── Investigative & Operational Analytics ─────────────────────────────────
+    "investigative analytics",   "crime analytics",
+    "law enforcement analytics", "intelligence platform",
+    "link analysis",             "digital evidence",
+    "evidence management",       "situational awareness",
+    "operational intelligence",
+    # ── Federated & Enterprise Search ─────────────────────────────────────────
+    "federated search",          "enterprise search",
+    "cross-system search",
+    # ── Entity Resolution & Record Intelligence ────────────────────────────────
+    "entity resolution",         "record deduplication",
+    "identity resolution",       "data deduplication",
+    # ── Secure Government SaaS ────────────────────────────────────────────────
+    "fedramp",                   "cjis",
+    "govcloud",                  "zero trust",
+    # ── Public Safety & Law Enforcement ───────────────────────────────────────
+    "law enforcement platform",  "public safety platform",
+    "records management system", "fusion center",
+    "crime gun intelligence",    "body camera analytics",
+    # ── Corrections & Community Supervision ───────────────────────────────────
+    "community supervision",     "offender management",
+    "probation",                 "corrections platform",
+    "court services",
+    # ── Platform Modernization & Replacement ──────────────────────────────────
+    "IT modernization",          "platform modernization",
+    "legacy modernization",      "platform replacement",
+    "digital transformation",
+    # ── AI & Machine Learning ─────────────────────────────────────────────────
+    "artificial intelligence",   "machine learning",
+    "predictive analytics",      "computer vision",
+    "AI platform",
+]
+
+def _is_doj(path: str) -> bool:
+    p = path.lower()
+    return any(f in p for f in DOJ_PATH_FRAGMENTS)
+
+
+def _is_dhs(path: str) -> bool:
+    p = path.lower()
+    return any(f in p for f in DHS_PATH_FRAGMENTS)
+
+
 def fetch_doj_opportunities() -> list[Opportunity]:
     """
-    DOJ-scoped: 5 orgs × 5 terms = 25 calls max.
-    Uses its own rate-limit check — not blocked by general SAM fetch limit.
+    DOJ opportunities: runs DOJ-specific title searches (no org filter),
+    then post-filters results by fullParentPathName containing DOJ agency names.
+    Zero organizationName calls — avoids the broken SAM.gov filter param.
     """
     if not SAM_API_KEY:
         return []
-    # Reset flag in case general SAM fetch hit a transient 429
-    _SAM_RATE_LIMITED[0] = False
+    _SAM_RATE_LIMITED[0] = False  # reset so prior rate limit doesn't block
     results, seen_ids = [], set()
     today   = datetime.utcnow()
     to_date = today.strftime("%m/%d/%Y")
     d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
-    orgs    = ["Department of Justice", "Alcohol, Tobacco, Firearms",
-               "Federal Bureau of Investigation", "Bureau of Prisons",
-               "Court Services and Offender"]
-    terms   = ["data analytics", "investigative platform",
-               "community supervision", "IT modernization", "digital evidence"]
-    for org in orgs:
-        for term in terms:
-            if _SAM_RATE_LIMITED[0]:
+
+    for term in AGENCY_SEARCH_TERMS:
+        if _SAM_RATE_LIMITED[0]:
+            break
+        try:
+            r = requests.get(
+                "https://api.sam.gov/opportunities/v2/search",
+                params={"api_key": SAM_API_KEY, "title": term,
+                        "postedFrom": d90, "postedTo": to_date,
+                        "active": "Yes", "limit": 100},
+                headers=HEADERS, timeout=15,
+            )
+            if r.status_code == 429:
+                _SAM_RATE_LIMITED[0] = True
                 break
-            _sam_search({"title": term, "organizationName": org,
-                         "postedFrom": d90, "postedTo": to_date},
-                        f"DOJ/{org[:15]}/{term}", seen_ids, results)
-    print(f"[DOJ] {len(results)} opportunities")
+            if r.status_code != 200:
+                continue
+            for item in r.json().get("opportunitiesData", []):
+                nid  = item.get("noticeId") or item.get("id") or ""
+                path = item.get("fullParentPathName", "") or ""
+                if not nid or nid in seen_ids or not _is_doj(path):
+                    continue
+                seen_ids.add(nid)
+                results.append(score_opportunity(Opportunity(
+                    title         = item.get("title", "Untitled"),
+                    notice_id     = nid,
+                    agency        = path,
+                    posted_date   = item.get("postedDate", ""),
+                    response_date = item.get("responseDeadLine", "TBD"),
+                    description   = (item.get("description") or "")[:2000],
+                    url           = clean_url(f"https://sam.gov/opp/{nid}/view",
+                                              "https://sam.gov/search"),
+                    opp_type      = item.get("type") or "Notice",
+                    source        = "SAM.gov",
+                    naics         = item.get("naicsCode", ""),
+                )))
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[DOJ] '{term}': {e}")
+
+    print(f"[DOJ] {len(results)} opportunities from targeted title search")
     return results
 
 
 def fetch_dhs_opportunities() -> list[Opportunity]:
     """
-    DHS-scoped: 4 orgs × 5 terms = 20 calls max.
-    Resets rate-limit flag so a transient 429 in SAM general fetch
-    does not prevent DHS-specific searches from running.
+    DHS opportunities: same approach as DOJ — title searches, post-filter
+    by fullParentPathName. No broken organizationName filter.
     """
     if not SAM_API_KEY:
         return []
@@ -685,25 +793,50 @@ def fetch_dhs_opportunities() -> list[Opportunity]:
     today   = datetime.utcnow()
     to_date = today.strftime("%m/%d/%Y")
     d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
-    orgs    = ["Homeland Security", "Immigration and Customs Enforcement",
-               "Cybersecurity and Infrastructure", "Federal Emergency Management"]
-    terms   = ["data analytics", "investigative platform",
-               "community supervision", "IT modernization", "digital evidence"]
-    for org in orgs:
-        for term in terms:
-            if _SAM_RATE_LIMITED[0]:
+
+    for term in AGENCY_SEARCH_TERMS:
+        if _SAM_RATE_LIMITED[0]:
+            break
+        try:
+            r = requests.get(
+                "https://api.sam.gov/opportunities/v2/search",
+                params={"api_key": SAM_API_KEY, "title": term,
+                        "postedFrom": d90, "postedTo": to_date,
+                        "active": "Yes", "limit": 100},
+                headers=HEADERS, timeout=15,
+            )
+            if r.status_code == 429:
+                _SAM_RATE_LIMITED[0] = True
                 break
-            _sam_search({"title": term, "organizationName": org,
-                         "postedFrom": d90, "postedTo": to_date},
-                        f"DHS/{org[:15]}/{term}", seen_ids, results)
-    print(f"[DHS] {len(results)} opportunities")
+            if r.status_code != 200:
+                continue
+            for item in r.json().get("opportunitiesData", []):
+                nid  = item.get("noticeId") or item.get("id") or ""
+                path = item.get("fullParentPathName", "") or ""
+                if not nid or nid in seen_ids or not _is_dhs(path):
+                    continue
+                seen_ids.add(nid)
+                results.append(score_opportunity(Opportunity(
+                    title         = item.get("title", "Untitled"),
+                    notice_id     = nid,
+                    agency        = path,
+                    posted_date   = item.get("postedDate", ""),
+                    response_date = item.get("responseDeadLine", "TBD"),
+                    description   = (item.get("description") or "")[:2000],
+                    url           = clean_url(f"https://sam.gov/opp/{nid}/view",
+                                              "https://sam.gov/search"),
+                    opp_type      = item.get("type") or "Notice",
+                    source        = "SAM.gov",
+                    naics         = item.get("naicsCode", ""),
+                )))
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[DHS] '{term}': {e}")
+
+    print(f"[DHS] {len(results)} opportunities from targeted title search")
     return results
 
 
-
-# ---------------------------------------------------------------------------
-# SOURCE 2: FEDERAL REGISTER API
-# ---------------------------------------------------------------------------
 def fetch_federal_register() -> list[Opportunity]:
     """Search Federal Register for RFI/Sources Sought notices (10-day window)."""
     results   = []
@@ -2275,14 +2408,21 @@ def build_competitor_section(intel_items: list, growth_items: list = None) -> st
               <div style="font-size:11px;color:#888;margin-top:2px;">Expires: {rc['date']} · {rc['source']}</div>
               {f'<div style="font-size:12px;color:#555;margin-top:3px;">{rc.get("summary","")[:200]}</div>' if rc.get("summary") else ''}
             </div>"""
+        # Build competitor breakdown for header
+        comp_counts = {}
+        for rc in recompetes:
+            name = rc["competitor"].replace(" — Recompete Alert", "")
+            comp_counts[name] = comp_counts.get(name, 0) + 1
+        comp_summary = ", ".join(f"{n} ({c})" for n, c in sorted(comp_counts.items()))
         recompete_html = f"""
         <div style="margin-bottom:16px;">
           <div style="font-weight:700;font-size:13px;color:#c0392b;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">
-            🎯 Palantir Recompete Opportunities ({len(recompetes)} expiring contracts)
+            🎯 Competitor Recompete Opportunities ({len(recompetes)} expiring contracts)
           </div>
-          <p style="font-size:12px;color:#666;margin:0 0 8px;">Active Palantir contracts expiring within 12 months — displacement opportunities for Peregrine.</p>
-          {rc_rows}
+          <p style="font-size:12px;color:#666;margin:0 0 8px;">Expiring contracts — displacement opportunities for Peregrine: {comp_summary}</p>
+          {{rc_rows}}
         </div>"""
+        recompete_html = recompete_html.format(rc_rows=rc_rows)
 
     # ── News stories by competitor ────────────────────────────────────────────
     news_rows = ""
