@@ -1924,4 +1924,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import traceback
+    try:
+        main()
+    except Exception as e:
+        print(f"[FATAL ERROR] {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise
