@@ -592,7 +592,7 @@ def _sam_search(extra_params: dict, label: str,
         if _SAM_RATE_LIMITED[0]:
             break
         try:
-            params = {"api_key": SAM_API_KEY, "active": "Yes",
+            params = {"api_key": SAM_API_KEY,
                       "limit": 100, "offset": page * 100, **extra_params}
             r = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
@@ -666,7 +666,7 @@ def fetch_sam_gov() -> list[Opportunity]:
     d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
 
     # ── Pass 1: Paginated ptype sweeps — ALL agencies, last 30 days ───────────
-    # 2 pages × 100 results = up to 200 per notice type across every agency
+    # 4 pages × 100 = up to 400 per notice type. Covers ~2400 recent notices.
     for ptype, lbl in [
         ("r", "Sources Sought"),
         ("p", "Presolicitation"),
@@ -676,12 +676,37 @@ def fetch_sam_gov() -> list[Opportunity]:
         ("i", "Intent to Bundle"),
     ]:
         if not _sam_search({"ptype": ptype, "postedFrom": d30, "postedTo": to_date},
-                           lbl, seen_ids, results, pages=2):
+                           lbl, seen_ids, results, pages=4):
             break
 
-    # ── Pass 2: Capability title searches — ALL agencies, 90-day window ───────
-    # Covers opps older than 30 days and anything missed by ptype page cap.
-    # High-volume terms paginated to 3 pages (up to 300 results each).
+    # ── Pass 2a: Broad keyword searches — catches opps that title= misses ──────
+    # SAM.gov keyword= searches title AND description, wider net than title=
+    KEYWORD_SEARCHES = [
+        # Specific enough to return <100 results each
+        ("data management solutions",    1),
+        ("sovereign cloud",              1),
+        ("commercial solutions opening", 1),
+        ("defense cloud",                1),
+        ("federated search",             1),
+        ("investigative analytics",      1),
+        ("entity resolution",            1),
+        ("crime gun intelligence",       1),
+        ("fedramp high",                 1),
+        ("zero trust data",              1),
+        ("law enforcement analytics",    1),
+        ("offender management system",   1),
+        ("community supervision",        1),
+        ("intelligence platform",        1),
+        ("data integration platform",    1),
+        ("records management system",    1),
+    ]
+    for term, pages in KEYWORD_SEARCHES:
+        if _SAM_RATE_LIMITED[0]:
+            break
+        _sam_search({"keyword": term, "postedFrom": d90, "postedTo": to_date},
+                    f"kw={term}", seen_ids, results, pages=pages)
+
+    # ── Pass 2b: Capability title searches — ALL agencies, 90-day window ──────
     TITLE_SEARCHES = [
         # Specific compound phrases — low volume, 1 page sufficient
         ("investigative platform",     1),
