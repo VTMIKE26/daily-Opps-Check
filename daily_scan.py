@@ -718,7 +718,8 @@ def fetch_sam_gov() -> list[Opportunity]:
         ("machine learning",           2),
         ("platform modernization",     2),
         ("predictive analytics",       2),
-        ("data management",            2),
+        ("data management",            3),
+        ("data management solutions",    1),
         ("digital transformation",     2),
     ]
     for term, pages in TITLE_SEARCHES:
