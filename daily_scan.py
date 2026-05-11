@@ -314,8 +314,8 @@ CAPABILITY_CLUSTERS = [
             "ai system", "ai services",
             # Space-padded to prevent substring matches like "regenerative" → "generative ai"
             " generative ai", "generative ai ",
-            "large language model", "llm",
-            "natural language processing", "nlp",
+            "large language model", " llm ",
+            "natural language processing", " nlp ",
             "computer vision", "predictive model",
             "decision support", "decision support system",
             "automated analysis", "intelligent automation",
