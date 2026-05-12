@@ -762,6 +762,74 @@ def fetch_sam_gov() -> list[Opportunity]:
                            f"title={term}", seen_ids, results, pages=pages):
             break
 
+    # ── Pass 3: Response deadline search — catches open notices regardless ──────
+    # of posted date or active status. Searches for notices still accepting
+    # responses. This is the most reliable way to find currently open opps.
+    today_str  = today.strftime("%m/%d/%Y")
+    future_str = (today + timedelta(days=180)).strftime("%m/%d/%Y")
+    
+    DEADLINE_TERMS = [
+        "data management solutions",
+        "sovereign cloud",
+        "commercial solutions opening",
+        "data management platform",
+        "investigative analytics",
+        "law enforcement analytics",
+        "intelligence platform",
+        "data integration platform",
+        "federated search",
+        "offender management system",
+        "records management system",
+    ]
+    for term in DEADLINE_TERMS:
+        if _SAM_RATE_LIMITED[0]:
+            break
+        _sam_search(
+            {"title": term, "rdlfrom": today_str, "rdlto": future_str},
+            f"rdl={term}", seen_ids, results, pages=1
+        )
+
+    # ── Pass 4: Direct notice ID lookups — guaranteed catch of known opps ─────
+    # noticeid= fetches a SPECIFIC notice regardless of date, active, or archive
+    WATCH_LIST = [
+        "b2910bda98f342149cd76c39de3038c6",  # Data Management Solutions — FBI
+        "55c0c5ea5ef84232869c0134386dfa48",  # Sovereign Defense Cloud — ERDC
+        "70e476afd4584a63a9890f0071e4871e",  # (Mike's third notice)
+    ]
+    for nid in WATCH_LIST:
+        if nid in seen_ids or _SAM_RATE_LIMITED[0]:
+            continue
+        try:
+            r = requests.get(
+                "https://api.sam.gov/opportunities/v2/search",
+                params={"api_key": SAM_API_KEY, "noticeid": nid,
+                        "postedFrom": "01/01/2020", "postedTo": today_str},
+                headers=HEADERS, timeout=15,
+            )
+            if r.status_code == 200:
+                for item in r.json().get("opportunitiesData", []):
+                    item_nid = item.get("noticeId") or item.get("id") or ""
+                    if not item_nid or item_nid in seen_ids:
+                        continue
+                    seen_ids.add(item_nid)
+                    opp = score_opportunity(Opportunity(
+                        title         = item.get("title", "Untitled"),
+                        notice_id     = item_nid,
+                        agency        = item.get("fullParentPathName") or "Unknown",
+                        posted_date   = item.get("postedDate", ""),
+                        response_date = item.get("responseDeadLine") or item.get("reponseDeadLine", "TBD"),
+                        description   = (item.get("description") or "")[:2000],
+                        url           = clean_url(f"https://sam.gov/opp/{item_nid}/view",
+                                                  "https://sam.gov/search"),
+                        opp_type      = item.get("type") or "Notice",
+                        source        = "SAM.gov",
+                        naics         = item.get("naicsCode", ""),
+                    ))
+                    results.append(opp)
+                    print(f"[SAM.gov] Watch list: {item.get('title','?')[:60]} ({item.get('active','?')} active)")
+        except Exception as e:
+            print(f"[SAM.gov] Watch list {nid[:8]}: {e}")
+
     # Cache for DOJ/DHS/DoD post-filtering — zero extra API calls
     _SAM_RESULTS_CACHE.clear()
     _SAM_RESULTS_CACHE.extend(results)
