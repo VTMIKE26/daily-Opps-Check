@@ -794,7 +794,7 @@ def fetch_sam_gov() -> list[Opportunity]:
     WATCH_LIST = [
         "b2910bda98f342149cd76c39de3038c6",  # Data Management Solutions — FBI
         "55c0c5ea5ef84232869c0134386dfa48",  # Sovereign Defense Cloud — ERDC
-        "70e476afd4584a63a9890f0071e4871e",  # (additional notice)
+        "70e476afd4584a63a9890f0071e4871e",  # Additional notice
         "d32237c586bc45489644f757c52faa22",  # FBI CJIS Decentralized Info Sharing RFI
     ]
     for nid in WATCH_LIST:
@@ -813,13 +813,27 @@ def fetch_sam_gov() -> list[Opportunity]:
                     if not item_nid or item_nid in seen_ids:
                         continue
                     seen_ids.add(item_nid)
+                    # Fetch actual description text
+                    desc_text = ""
+                    desc_url  = item.get("description") or ""
+                    if desc_url and desc_url.startswith("http"):
+                        try:
+                            dr = requests.get(f"{desc_url}&api_key={SAM_API_KEY}",
+                                              headers=HEADERS, timeout=10)
+                            if dr.status_code == 200:
+                                import html as _html
+                                desc_text = re.sub(r"<[^>]+>", " ",
+                                    _html.unescape(dr.text))[:3000]
+                        except Exception:
+                            pass
                     opp = score_opportunity(Opportunity(
                         title         = item.get("title", "Untitled"),
                         notice_id     = item_nid,
                         agency        = item.get("fullParentPathName") or "Unknown",
                         posted_date   = item.get("postedDate", ""),
-                        response_date = item.get("responseDeadLine") or item.get("reponseDeadLine", "TBD"),
-                        description   = (item.get("description") or "")[:2000],
+                        response_date = item.get("responseDeadLine") or
+                                        item.get("reponseDeadLine", "TBD"),
+                        description   = desc_text or (item.get("description") or "")[:2000],
                         url           = clean_url(f"https://sam.gov/opp/{item_nid}/view",
                                                   "https://sam.gov/search"),
                         opp_type      = item.get("type") or "Notice",
@@ -827,9 +841,9 @@ def fetch_sam_gov() -> list[Opportunity]:
                         naics         = item.get("naicsCode", ""),
                     ))
                     results.append(opp)
-                    print(f"[SAM.gov] Watch list: {item.get('title','?')[:60]} ({item.get('active','?')} active)")
+                    print(f"[SAM.gov] Watch: {item.get('title','?')[:60]} | score={opp.score}")
         except Exception as e:
-            print(f"[SAM.gov] Watch list {nid[:8]}: {e}")
+            print(f"[SAM.gov] Watch {nid[:8]}: {e}")
 
     # Cache for DOJ/DHS/DoD post-filtering — zero extra API calls
     _SAM_RESULTS_CACHE.clear()
@@ -997,6 +1011,22 @@ def fetch_doj_opportunities() -> list:
                         continue
                     seen_ids.add(nid)
                     new_count += 1
+                    # Fetch actual description text (SAM returns a URL not text)
+                    desc_text = ""
+                    desc_url  = item.get("description") or ""
+                    if desc_url and desc_url.startswith("http"):
+                        try:
+                            dr = requests.get(
+                                f"{desc_url}&api_key={SAM_API_KEY}",
+                                headers=HEADERS, timeout=10
+                            )
+                            if dr.status_code == 200:
+                                raw = dr.text
+                                # Strip HTML tags
+                                import html as _html
+                                desc_text = re.sub(r"<[^>]+>", " ", _html.unescape(raw))[:3000]
+                        except Exception:
+                            pass
                     opp = score_opportunity(Opportunity(
                         title         = item.get("title", "Untitled"),
                         notice_id     = nid,
@@ -1004,7 +1034,7 @@ def fetch_doj_opportunities() -> list:
                         posted_date   = item.get("postedDate", ""),
                         response_date = item.get("responseDeadLine") or
                                         item.get("reponseDeadLine", "TBD"),
-                        description   = (item.get("description") or "")[:2000],
+                        description   = desc_text or (item.get("description") or "")[:2000],
                         url           = clean_url(
                             f"https://sam.gov/opp/{nid}/view",
                             "https://sam.gov/search"),
@@ -1093,6 +1123,19 @@ def fetch_dhs_opportunities() -> list:
                         continue
                     seen_ids.add(nid)
                     new_count += 1
+                    desc_text = ""
+                    desc_url  = item.get("description") or ""
+                    if desc_url and desc_url.startswith("http"):
+                        try:
+                            dr = requests.get(
+                                f"{desc_url}&api_key={SAM_API_KEY}",
+                                headers=HEADERS, timeout=10
+                            )
+                            if dr.status_code == 200:
+                                import html as _html
+                                desc_text = re.sub(r"<[^>]+>", " ", _html.unescape(dr.text))[:3000]
+                        except Exception:
+                            pass
                     opp = score_opportunity(Opportunity(
                         title         = item.get("title", "Untitled"),
                         notice_id     = nid,
@@ -1100,7 +1143,7 @@ def fetch_dhs_opportunities() -> list:
                         posted_date   = item.get("postedDate", ""),
                         response_date = item.get("responseDeadLine") or
                                         item.get("reponseDeadLine", "TBD"),
-                        description   = (item.get("description") or "")[:2000],
+                        description   = desc_text or (item.get("description") or "")[:2000],
                         url           = clean_url(
                             f"https://sam.gov/opp/{nid}/view",
                             "https://sam.gov/search"),
@@ -1692,7 +1735,7 @@ def build_section(title: str, opps: list) -> str:
     if not opps:
         return ""
     rows = ""
-    for o in opps[:20]:
+    for o in opps[:50]:
         link = (f'<a href="{o.url}" style="font-weight:700;font-size:14px;color:#0057b8;text-decoration:none;">{o.title[:120]}</a>'
                 if o.url else f'<span style="font-weight:700;font-size:14px;color:#333;">{o.title[:120]}</span>')
         reasons_html = ""
