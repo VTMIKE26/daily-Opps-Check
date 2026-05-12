@@ -794,7 +794,8 @@ def fetch_sam_gov() -> list[Opportunity]:
     WATCH_LIST = [
         "b2910bda98f342149cd76c39de3038c6",  # Data Management Solutions — FBI
         "55c0c5ea5ef84232869c0134386dfa48",  # Sovereign Defense Cloud — ERDC
-        "70e476afd4584a63a9890f0071e4871e",  # (Mike's third notice)
+        "70e476afd4584a63a9890f0071e4871e",  # (additional notice)
+        "d32237c586bc45489644f757c52faa22",  # FBI CJIS Decentralized Info Sharing RFI
     ]
     for nid in WATCH_LIST:
         if nid in seen_ids or _SAM_RATE_LIMITED[0]:
@@ -922,21 +923,209 @@ def _is_dhs(path: str) -> bool:
 
 
 def fetch_doj_opportunities() -> list:
-    from_cache = [o for o in _SAM_RESULTS_CACHE if _is_doj(o.agency)]
-    if from_cache:
-        print(f"[DOJ] {len(from_cache)} opportunities (from SAM cache)")
+    """
+    Fetch ALL notices from DOJ sub-agencies and score them locally.
+    
+    KEY INSIGHT: SAM.gov API only searches titles. Many great opportunities
+    like the FBI CJIS RFI have generic titles ("RFI - Information Sharing")
+    but highly relevant descriptions. The only reliable way to catch them
+    is to fetch EVERYTHING from these agencies and let our scoring engine
+    find the gems.
+    
+    Each agency gets its own sweep: all ptypes, 90-day window.
+    ~14 API calls total — very cheap, highly reliable.
+    """
+    if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
+        # Fall back to cache filter
+        from_cache = [o for o in _SAM_RESULTS_CACHE if _is_doj(o.agency)]
+        print(f"[DOJ] {len(from_cache)} from SAM cache (no API key / rate limited)")
         return from_cache
-    print("[DOJ] Cache empty — no fallback calls")
-    return []
+
+    results  = []
+    seen_ids = set(o.notice_id for o in _SAM_RESULTS_CACHE)  # don't re-add cache hits
+    today    = datetime.utcnow()
+    d90      = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    to_date  = today.strftime("%m/%d/%Y")
+
+    # Every DOJ sub-agency — fetch ALL their notices
+    DOJ_AGENCIES = [
+        "Federal Bureau of Investigation",
+        "Alcohol, Tobacco, Firearms and Explosives",
+        "Drug Enforcement Administration",
+        "Bureau of Prisons",
+        "U.S. Marshals Service",
+        "Court Services and Offender Supervision Agency",
+        "Executive Office for United States Attorneys",
+        "National Security Division",
+        "Office of Justice Programs",
+        "Community Oriented Policing Services",
+        "Justice Management Division",
+    ]
+
+    for agency in DOJ_AGENCIES:
+        if _SAM_RATE_LIMITED[0]:
+            break
+        new_count = 0
+        for page in range(3):  # up to 300 per agency
+            if _SAM_RATE_LIMITED[0]:
+                break
+            try:
+                r = requests.get(
+                    "https://api.sam.gov/opportunities/v2/search",
+                    params={
+                        "api_key":          SAM_API_KEY,
+                        "organizationName": agency,
+                        "postedFrom":       d90,
+                        "postedTo":         to_date,
+                        "limit":            100,
+                        "offset":           page * 100,
+                    },
+                    headers=HEADERS, timeout=20,
+                )
+                if r.status_code == 429:
+                    print(f"[DOJ] Rate limited on {agency}")
+                    _SAM_RATE_LIMITED[0] = True
+                    break
+                if r.status_code != 200:
+                    break
+                data  = r.json()
+                items = data.get("opportunitiesData", [])
+                total = data.get("totalRecords", 0)
+                for item in items:
+                    nid = item.get("noticeId") or item.get("id") or ""
+                    if not nid or nid in seen_ids:
+                        continue
+                    seen_ids.add(nid)
+                    new_count += 1
+                    opp = score_opportunity(Opportunity(
+                        title         = item.get("title", "Untitled"),
+                        notice_id     = nid,
+                        agency        = item.get("fullParentPathName") or agency,
+                        posted_date   = item.get("postedDate", ""),
+                        response_date = item.get("responseDeadLine") or
+                                        item.get("reponseDeadLine", "TBD"),
+                        description   = (item.get("description") or "")[:2000],
+                        url           = clean_url(
+                            f"https://sam.gov/opp/{nid}/view",
+                            "https://sam.gov/search"),
+                        opp_type      = item.get("type") or "Notice",
+                        source        = "SAM.gov",
+                        naics         = item.get("naicsCode", ""),
+                    ))
+                    results.append(opp)
+                if len(items) < 100:
+                    break  # no more pages
+                time.sleep(0.2)
+            except Exception as e:
+                print(f"[DOJ] {agency}: {e}")
+                break
+        if new_count:
+            print(f"[DOJ] {agency}: {new_count} new opportunities")
+        time.sleep(0.3)
+
+    # Also add anything from the SAM cache we might have missed
+    for o in _SAM_RESULTS_CACHE:
+        if _is_doj(o.agency) and o.notice_id not in seen_ids:
+            results.append(o)
+
+    scored = [o for o in results if o.score > 0]
+    print(f"[DOJ] Total: {len(results)} fetched, {len(scored)} scored relevant")
+    return results
 
 
 def fetch_dhs_opportunities() -> list:
-    from_cache = [o for o in _SAM_RESULTS_CACHE if _is_dhs(o.agency)]
-    if from_cache:
-        print(f"[DHS] {len(from_cache)} opportunities (from SAM cache)")
+    """Fetch ALL notices from DHS sub-agencies and score locally."""
+    if not SAM_API_KEY or _SAM_RATE_LIMITED[0]:
+        from_cache = [o for o in _SAM_RESULTS_CACHE if _is_dhs(o.agency)]
+        print(f"[DHS] {len(from_cache)} from SAM cache")
         return from_cache
-    print("[DHS] Cache empty — no fallback calls")
-    return []
+
+    results  = []
+    seen_ids = set(o.notice_id for o in _SAM_RESULTS_CACHE)
+    today    = datetime.utcnow()
+    d90      = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    to_date  = today.strftime("%m/%d/%Y")
+
+    DHS_AGENCIES = [
+        "Immigration and Customs Enforcement",
+        "Customs and Border Protection",
+        "Cybersecurity and Infrastructure Security Agency",
+        "Transportation Security Administration",
+        "Federal Emergency Management Agency",
+        "United States Secret Service",
+        "United States Citizenship and Immigration Services",
+        "Federal Law Enforcement Training Centers",
+        "Science and Technology Directorate",
+        "Intelligence and Analysis",
+        "Coast Guard",
+    ]
+
+    for agency in DHS_AGENCIES:
+        if _SAM_RATE_LIMITED[0]:
+            break
+        new_count = 0
+        for page in range(3):
+            if _SAM_RATE_LIMITED[0]:
+                break
+            try:
+                r = requests.get(
+                    "https://api.sam.gov/opportunities/v2/search",
+                    params={
+                        "api_key":          SAM_API_KEY,
+                        "organizationName": agency,
+                        "postedFrom":       d90,
+                        "postedTo":         to_date,
+                        "limit":            100,
+                        "offset":           page * 100,
+                    },
+                    headers=HEADERS, timeout=20,
+                )
+                if r.status_code == 429:
+                    _SAM_RATE_LIMITED[0] = True
+                    break
+                if r.status_code != 200:
+                    break
+                data  = r.json()
+                items = data.get("opportunitiesData", [])
+                for item in items:
+                    nid = item.get("noticeId") or item.get("id") or ""
+                    if not nid or nid in seen_ids:
+                        continue
+                    seen_ids.add(nid)
+                    new_count += 1
+                    opp = score_opportunity(Opportunity(
+                        title         = item.get("title", "Untitled"),
+                        notice_id     = nid,
+                        agency        = item.get("fullParentPathName") or agency,
+                        posted_date   = item.get("postedDate", ""),
+                        response_date = item.get("responseDeadLine") or
+                                        item.get("reponseDeadLine", "TBD"),
+                        description   = (item.get("description") or "")[:2000],
+                        url           = clean_url(
+                            f"https://sam.gov/opp/{nid}/view",
+                            "https://sam.gov/search"),
+                        opp_type      = item.get("type") or "Notice",
+                        source        = "SAM.gov",
+                        naics         = item.get("naicsCode", ""),
+                    ))
+                    results.append(opp)
+                if len(items) < 100:
+                    break
+                time.sleep(0.2)
+            except Exception as e:
+                print(f"[DHS] {agency}: {e}")
+                break
+        if new_count:
+            print(f"[DHS] {agency}: {new_count} new opportunities")
+        time.sleep(0.3)
+
+    for o in _SAM_RESULTS_CACHE:
+        if _is_dhs(o.agency) and o.notice_id not in seen_ids:
+            results.append(o)
+
+    scored = [o for o in results if o.score > 0]
+    print(f"[DHS] Total: {len(results)} fetched, {len(scored)} scored relevant")
+    return results
 
 
 def fetch_dod_opportunities() -> list:
