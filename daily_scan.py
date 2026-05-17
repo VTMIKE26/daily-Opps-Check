@@ -976,6 +976,7 @@ def fetch_doj_opportunities() -> list:
         "Justice Management Division",
     ]
 
+    desc_fetches = 0  # cap description fetches to avoid timeout
     for agency in DOJ_AGENCIES:
         if _SAM_RATE_LIMITED[0]:
             break
@@ -1011,30 +1012,44 @@ def fetch_doj_opportunities() -> list:
                         continue
                     seen_ids.add(nid)
                     new_count += 1
-                    # Fetch actual description text (SAM returns a URL not text)
+                    title_str = item.get("title", "Untitled")
+                    # Quick title-only score first to decide if worth fetching desc
+                    quick_opp = score_opportunity(Opportunity(
+                        title=title_str, notice_id=nid,
+                        agency=item.get("fullParentPathName") or agency,
+                        posted_date=item.get("postedDate",""),
+                        response_date=item.get("responseDeadLine") or "TBD",
+                        description="", url="", opp_type="", source="SAM.gov",
+                    ))
+                    # Only fetch description if title scored OR agency is top-tier
+                    TOP_AGENCIES = ["federal bureau of investigation", "cjis",
+                                    "alcohol, tobacco", "bureau of prisons",
+                                    "court services and offender"]
+                    fetch_desc = (quick_opp.score > 0 or
+                                  any(a in agency.lower() for a in TOP_AGENCIES))
                     desc_text = ""
-                    desc_url  = item.get("description") or ""
-                    if desc_url and desc_url.startswith("http"):
-                        try:
-                            dr = requests.get(
-                                f"{desc_url}&api_key={SAM_API_KEY}",
-                                headers=HEADERS, timeout=10
-                            )
-                            if dr.status_code == 200:
-                                raw = dr.text
-                                # Strip HTML tags
-                                import html as _html
-                                desc_text = re.sub(r"<[^>]+>", " ", _html.unescape(raw))[:3000]
-                        except Exception:
-                            pass
+                    if fetch_desc and desc_fetches < 30:
+                        desc_url = item.get("description") or ""
+                        if desc_url and desc_url.startswith("http"):
+                            try:
+                                dr = requests.get(
+                                    f"{desc_url}&api_key={SAM_API_KEY}",
+                                    headers=HEADERS, timeout=5)
+                                if dr.status_code == 200:
+                                    import html as _html
+                                    desc_text = re.sub(r"<[^>]+>", " ",
+                                        _html.unescape(dr.text))[:2000]
+                                desc_fetches += 1
+                            except Exception:
+                                pass
                     opp = score_opportunity(Opportunity(
-                        title         = item.get("title", "Untitled"),
+                        title         = title_str,
                         notice_id     = nid,
                         agency        = item.get("fullParentPathName") or agency,
                         posted_date   = item.get("postedDate", ""),
                         response_date = item.get("responseDeadLine") or
                                         item.get("reponseDeadLine", "TBD"),
-                        description   = desc_text or (item.get("description") or "")[:2000],
+                        description   = desc_text,
                         url           = clean_url(
                             f"https://sam.gov/opp/{nid}/view",
                             "https://sam.gov/search"),
@@ -1044,14 +1059,14 @@ def fetch_doj_opportunities() -> list:
                     ))
                     results.append(opp)
                 if len(items) < 100:
-                    break  # no more pages
-                time.sleep(0.2)
+                    break
+                time.sleep(0.15)
             except Exception as e:
                 print(f"[DOJ] {agency}: {e}")
                 break
         if new_count:
-            print(f"[DOJ] {agency}: {new_count} new opportunities")
-        time.sleep(0.3)
+            print(f"[DOJ] {agency}: {new_count} opportunities")
+        time.sleep(0.2)
 
     # Also add anything from the SAM cache we might have missed
     for o in _SAM_RESULTS_CACHE:
@@ -1090,6 +1105,7 @@ def fetch_dhs_opportunities() -> list:
         "Coast Guard",
     ]
 
+    desc_fetches = 0
     for agency in DHS_AGENCIES:
         if _SAM_RATE_LIMITED[0]:
             break
@@ -1123,27 +1139,41 @@ def fetch_dhs_opportunities() -> list:
                         continue
                     seen_ids.add(nid)
                     new_count += 1
+                    title_str = item.get("title", "Untitled")
+                    quick_opp = score_opportunity(Opportunity(
+                        title=title_str, notice_id=nid,
+                        agency=item.get("fullParentPathName") or agency,
+                        posted_date=item.get("postedDate",""),
+                        response_date=item.get("responseDeadLine") or "TBD",
+                        description="", url="", opp_type="", source="SAM.gov",
+                    ))
+                    DHS_TOP = ["immigration and customs", "customs and border",
+                               "cybersecurity", "secret service"]
+                    fetch_desc = (quick_opp.score > 0 or
+                                  any(a in agency.lower() for a in DHS_TOP))
                     desc_text = ""
-                    desc_url  = item.get("description") or ""
-                    if desc_url and desc_url.startswith("http"):
-                        try:
-                            dr = requests.get(
-                                f"{desc_url}&api_key={SAM_API_KEY}",
-                                headers=HEADERS, timeout=10
-                            )
-                            if dr.status_code == 200:
-                                import html as _html
-                                desc_text = re.sub(r"<[^>]+>", " ", _html.unescape(dr.text))[:3000]
-                        except Exception:
-                            pass
+                    if fetch_desc and desc_fetches < 30:
+                        desc_url = item.get("description") or ""
+                        if desc_url and desc_url.startswith("http"):
+                            try:
+                                dr = requests.get(
+                                    f"{desc_url}&api_key={SAM_API_KEY}",
+                                    headers=HEADERS, timeout=5)
+                                if dr.status_code == 200:
+                                    import html as _html
+                                    desc_text = re.sub(r"<[^>]+>", " ",
+                                        _html.unescape(dr.text))[:2000]
+                                desc_fetches += 1
+                            except Exception:
+                                pass
                     opp = score_opportunity(Opportunity(
-                        title         = item.get("title", "Untitled"),
+                        title         = title_str,
                         notice_id     = nid,
                         agency        = item.get("fullParentPathName") or agency,
                         posted_date   = item.get("postedDate", ""),
                         response_date = item.get("responseDeadLine") or
                                         item.get("reponseDeadLine", "TBD"),
-                        description   = desc_text or (item.get("description") or "")[:2000],
+                        description   = desc_text,
                         url           = clean_url(
                             f"https://sam.gov/opp/{nid}/view",
                             "https://sam.gov/search"),
@@ -1154,13 +1184,13 @@ def fetch_dhs_opportunities() -> list:
                     results.append(opp)
                 if len(items) < 100:
                     break
-                time.sleep(0.2)
+                time.sleep(0.15)
             except Exception as e:
                 print(f"[DHS] {agency}: {e}")
                 break
         if new_count:
-            print(f"[DHS] {agency}: {new_count} new opportunities")
-        time.sleep(0.3)
+            print(f"[DHS] {agency}: {new_count} opportunities")
+        time.sleep(0.2)
 
     for o in _SAM_RESULTS_CACHE:
         if _is_dhs(o.agency) and o.notice_id not in seen_ids:
