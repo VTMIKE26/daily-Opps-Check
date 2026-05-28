@@ -1424,6 +1424,14 @@ def fetch_industry_news() -> list[dict]:
                 combined = f"{title} {desc}".lower()
                 if not any(kw in combined for kw in keywords):
                     continue
+                if date_:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        pub_dt = parsedate_to_datetime(date_).replace(tzinfo=None)
+                        if (datetime.utcnow() - pub_dt).days > 7:
+                            continue
+                    except Exception:
+                        pass
                 seen.add(title)
                 news.append({
                     "title": title, "url": clean_url(url_, ""),
@@ -3701,6 +3709,14 @@ def fetch_agency_budget_news() -> list[dict]:
                 date_ = (p_el.text or "").strip() if p_el is not None else ""
                 if not title or title in seen:
                     continue
+                if date_:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        pub_dt = parsedate_to_datetime(date_).replace(tzinfo=None)
+                        if (datetime.utcnow() - pub_dt).days > 7:
+                            continue
+                    except Exception:
+                        pass
                 seen.add(title)
                 items.append({
                     "label": label, "title": title, "summary": desc[:280],
