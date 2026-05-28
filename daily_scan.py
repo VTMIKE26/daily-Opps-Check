@@ -1732,6 +1732,16 @@ def fetch_agency_budget_news() -> list[dict]:
                 date_ = (p_el.text or "").strip() if p_el is not None else ""
                 if not title or title in seen:
                     continue
+                # Only keep items from the last 7 days
+                if date_:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        pub_dt = parsedate_to_datetime(date_)
+                        pub_dt = pub_dt.replace(tzinfo=None)
+                        if (datetime.utcnow() - pub_dt).days > 7:
+                            continue
+                    except Exception:
+                        pass  # unparseable date — include it
                 seen.add(title)
                 items.append({
                     "label": label, "title": title, "summary": desc[:280],
