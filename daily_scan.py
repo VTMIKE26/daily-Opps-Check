@@ -1299,13 +1299,14 @@ def build_competitor_section(intel_items: list, growth_items: list = None) -> st
                       f'{sh}</div>')
 
     monitoring = ", ".join(c["name"] for c in COMPETITORS)
+    news_rows_fallback = news_rows or "<p style='color:#aaa;font-size:13px;'>No competitor news this week.</p>"
     return (f'<div style="margin:20px 0 6px">'
             f'<h2 style="font-size:16px;color:#222;border-bottom:2px solid #eee;'
-            f'padding-bottom:5px;">🔎 Competitor Intelligence</h2>'
+            f'padding-bottom:5px;">&#x1F50E; Competitor Intelligence</h2>'
             f'<p style="font-size:12px;color:#888;margin:0 0 12px;">'
             f'Monitoring: {monitoring}</p>'
             f'{palantir_html}{other_rc_html}'
-            f'{news_rows or "<p style=\'color:#aaa;font-size:13px;\'>No competitor news this week.</p>"}'
+            f'{news_rows_fallback}'
             f'</div>')
 
 
@@ -1507,7 +1508,8 @@ def send_email(html: str, subject: str):
 def main():
     today    = datetime.utcnow()
     run_date = today.strftime("%B %d, %Y")
-    print(f"\n{'='*60}\n  Peregrine Daily Scanner — {run_date}\n{'='*60}")
+    sep = "=" * 60
+    print(f"\n{sep}\n  Peregrine Daily Scanner -- {run_date}\n{sep}")
 
     source_counts = {}
     all_opps      = []
