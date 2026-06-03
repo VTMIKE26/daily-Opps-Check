@@ -806,51 +806,63 @@ def fetch_sam_gov() -> list[Opportunity]:
         "d32237c586bc45489644f757c52faa22",  # FBI CJIS Decentralized Info Sharing RFI
         "7ca078ff27e24fd2b06a1553bbeadc59",  # DOJ Industry Day
     ]
+    # Watchlist: direct notice ID lookups — always runs regardless of seen_ids
+    # Uses noticeid= param which bypasses date filters and active status
     for nid in WATCH_LIST:
-        if nid in seen_ids or _SAM_RATE_LIMITED[0]:
-            continue
+        if _SAM_RATE_LIMITED[0]:
+            break
         try:
             r = requests.get(
                 "https://api.sam.gov/opportunities/v2/search",
                 params={"api_key": SAM_API_KEY, "noticeid": nid,
-                        "postedFrom": "01/01/2020", "postedTo": today_str},
+                        "postedFrom": "01/01/2020", "postedTo": today_str,
+                        "limit": 10},
                 headers=HEADERS, timeout=15,
             )
-            if r.status_code == 200:
-                for item in r.json().get("opportunitiesData", []):
-                    item_nid = item.get("noticeId") or item.get("id") or ""
-                    if not item_nid or item_nid in seen_ids:
-                        continue
-                    seen_ids.add(item_nid)
-                    # Fetch actual description text
-                    desc_text = ""
-                    desc_url  = item.get("description") or ""
-                    if desc_url and desc_url.startswith("http"):
-                        try:
-                            dr = requests.get(f"{desc_url}&api_key={SAM_API_KEY}",
-                                              headers=HEADERS, timeout=10)
-                            if dr.status_code == 200:
-                                import html as _html
-                                desc_text = re.sub(r"<[^>]+>", " ",
-                                    _html.unescape(dr.text))[:3000]
-                        except Exception:
-                            pass
-                    opp = score_opportunity(Opportunity(
-                        title         = item.get("title", "Untitled"),
-                        notice_id     = item_nid,
-                        agency        = item.get("fullParentPathName") or "Unknown",
-                        posted_date   = item.get("postedDate", ""),
-                        response_date = item.get("responseDeadLine") or
-                                        item.get("reponseDeadLine", "TBD"),
-                        description   = desc_text or (item.get("description") or "")[:2000],
-                        url           = clean_url(f"https://sam.gov/opp/{item_nid}/view",
-                                                  "https://sam.gov/search"),
-                        opp_type      = item.get("type") or "Notice",
-                        source        = "SAM.gov",
-                        naics         = item.get("naicsCode", ""),
-                    ))
-                    results.append(opp)
-                    print(f"[SAM.gov] Watch: {item.get('title','?')[:60]} | score={opp.score}")
+            if r.status_code != 200:
+                print(f"[SAM.gov] Watch {nid[:8]}: HTTP {r.status_code}")
+                continue
+            items = r.json().get("opportunitiesData", [])
+            if not items:
+                print(f"[SAM.gov] Watch {nid[:8]}: no results returned")
+                continue
+            for item in items:
+                item_nid = item.get("noticeId") or item.get("id") or ""
+                if not item_nid:
+                    continue
+                # Fetch description text
+                desc_text = ""
+                desc_url  = item.get("description") or ""
+                if desc_url and desc_url.startswith("http"):
+                    try:
+                        dr = requests.get(f"{desc_url}&api_key={SAM_API_KEY}",
+                                          headers=HEADERS, timeout=5)
+                        if dr.status_code == 200:
+                            import html as _html
+                            desc_text = re.sub(r"<[^>]+>", " ",
+                                _html.unescape(dr.text))[:3000]
+                    except Exception:
+                        pass
+                opp = score_opportunity(Opportunity(
+                    title         = item.get("title", "Untitled"),
+                    notice_id     = item_nid,
+                    agency        = item.get("fullParentPathName") or "Unknown",
+                    posted_date   = item.get("postedDate", ""),
+                    response_date = item.get("responseDeadLine") or
+                                    item.get("reponseDeadLine", "TBD"),
+                    description   = desc_text,
+                    url           = clean_url(f"https://sam.gov/opp/{item_nid}/view",
+                                              "https://sam.gov/search"),
+                    opp_type      = item.get("type") or "Notice",
+                    source        = "SAM.gov",
+                    naics         = item.get("naicsCode", ""),
+                ))
+                # Add or replace existing entry (watchlist always wins)
+                results = [r for r in results if r.notice_id != item_nid]
+                results.append(opp)
+                seen_ids.add(item_nid)
+                print(f"[SAM.gov] Watch ✓ {item.get('title','?')[:60]} | "
+                      f"score={opp.score} | active={item.get('active','?')}")
         except Exception as e:
             print(f"[SAM.gov] Watch {nid[:8]}: {e}")
 
