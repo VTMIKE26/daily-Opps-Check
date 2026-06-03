@@ -2428,44 +2428,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[FATAL ERROR] {type(e).__name__}: {e}")
         traceback.print_exc()
-        rai
-"""
-Peregrine.io Daily Federal Opportunity Scanner — Multi-Source Edition
-=======================================================================
-Data Sources (all free, no registration required except SAM.gov API):
-  1. SAM.gov API v2          — RFIs, Sources Sought, Pre-Solicitations, Industry Days
-  2. Federal Register API    — RFI notices published by federal agencies (NO KEY)
-  3. USASpending.gov API v2  — Recent contract awards in target NAICS (competitive intel) (NO KEY)
-  4. DHS/DOJ/FBI procurement — Web-scraped upcoming solicitations & industry events
-  5. GSA eBuy / schedules    — RSS/public feed scrape for IT Schedule 70 opportunities
-
-Outputs:
-  - Ranked HTML email digest sent to configured recipients
-  - Local HTML file saved for auditing
-"""
-
-import os
-import re
-import json
-import time
-import requests
-import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from typing import Optional
-from html import unescape
-from urllib.parse import urlencode
-
-# ---------------------------------------------------------------------------
-# CONFIGURATION — only 3 secrets needed
-# ---------------------------------------------------------------------------
-SAM_API_KEY       = os.environ.get("SAM_API_KEY", "")
-SENDGRID_API_KEY  = os.environ.get("SENDGRID_API_KEY", "")
-EMAIL_TO          = os.environ.get("EMAIL_TO", "mike.kelly@peregrine.io")
-EMAIL_FROM        = os.environ.get("EMAIL_FROM", "mike.kelly@peregrine.io")
-
-# Debug output — printed in GitHub Actions logs (secrets are masked automatically)
-print(f"[Config] SAM_API_KEY set:      {'YES' if SAM_API_KEY else 'NO - SAM.gov results will be empty'}")
-print(f"[Config] SENDGRID_API_KEY set: {'YES' if SENDGRID_API_KEY else 'NO - will fail at send step'}")
-print(f"[Config] EMAIL_TO:             {EMAIL_TO}")
-print(f"[Config] EMAIL_FROM:           {EMAIL_FROM}")
+        raise
