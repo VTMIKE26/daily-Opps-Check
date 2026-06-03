@@ -2229,35 +2229,18 @@ def _possible_fits(non_events: list, tiers: dict, shown: set = None) -> list:
 
 def build_industry_days_section(opps: list) -> str:
     """
-    Dedicated section for ALL industry days, vendor days, sources sought,
-    RFIs, BAAs, and market research notices from any federal agency.
-    Shown regardless of score — these are engagement opportunities.
+    Separate section listing ANY opportunity with "industry day" in the title.
+    No scoring threshold — if it says "Industry Day" it goes here.
     """
-    ENGAGEMENT_SIGNALS = [
-        "industry day", "vendor day", "market survey",
-        "sources sought", "request for information", "rfi",
-        "broad agency announcement", "baa",
-        "commercial solutions opening", "cso",
-        "pre-solicitation", "industry engagement",
-        "market research", "notice of intent",
-    ]
-    engagement_opps = []
-    seen = set()
-    for o in sorted(opps, key=lambda x: x.score, reverse=True):
-        if o.source == "Events Intelligence":
-            continue
-        text = f" {o.title} {o.description} ".lower()
-        if any(s in text for s in ENGAGEMENT_SIGNALS):
-            key = o.notice_id or o.title[:60].lower()
-            if key not in seen:
-                seen.add(key)
-                engagement_opps.append(o)
+    days = [o for o in opps
+            if "industry day" in o.title.lower()
+            and o.source != "Events Intelligence"]
 
-    if not engagement_opps:
+    if not days:
         return ""
 
     rows = ""
-    for o in engagement_opps[:30]:
+    for o in sorted(days, key=lambda x: x.posted_date, reverse=True)[:30]:
         link = (
             f'<a href="{o.url}" style="font-weight:700;font-size:14px;'
             f'color:#1a5276;text-decoration:none;">{o.title[:120]}</a>'
@@ -2268,48 +2251,42 @@ def build_industry_days_section(opps: list) -> str:
         deadline_html = ""
         if o.response_date and o.response_date not in ("TBD", ""):
             try:
-                from datetime import datetime
-                d = datetime.strptime(o.response_date[:10], "%Y-%m-%d")
-                days = (d - datetime.utcnow()).days
-                if 0 <= days <= 7:
+                from datetime import datetime as _dt
+                d = _dt.strptime(o.response_date[:10], "%Y-%m-%d")
+                days_left = (d - _dt.utcnow()).days
+                if 0 <= days_left <= 7:
                     deadline_html = (f' <span style="background:#c0392b;color:#fff;'
                                      f'font-size:10px;padding:1px 6px;border-radius:8px;">'
-                                     f'Due in {days}d</span>')
-                elif 0 <= days <= 30:
+                                     f'Due in {days_left}d</span>')
+                elif 0 <= days_left <= 30:
                     deadline_html = (f' <span style="background:#e67e22;color:#fff;'
                                      f'font-size:10px;padding:1px 6px;border-radius:8px;">'
-                                     f'Due in {days}d</span>')
+                                     f'Due in {days_left}d</span>')
             except Exception:
                 pass
-        score_badge = ""
-        if o.score >= 40:
-            score_badge = '<span style="background:#1e8449;color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;margin-left:6px;">Strong Match</span>'
-        elif o.score >= 15:
-            score_badge = '<span style="background:#1a5276;color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;margin-left:6px;">Good Match</span>'
         rows += (
             '<div style="border:1px solid #d6eaf8;border-radius:6px;padding:12px;'
             'margin-bottom:8px;background:#eaf4fb;">'
-            f'<div style="margin-bottom:4px;">{link}{deadline_html}{score_badge}</div>'
+            f'<div style="margin-bottom:4px;">{link}{deadline_html}</div>'
             f'<div style="font-size:12px;color:#555;">🏛 {o.agency[:80]}'
             f' &nbsp;·&nbsp; 📬 {o.posted_date[:10]}</div>'
             f'<div style="font-size:11px;color:#888;margin-top:2px;">'
-            f'Source: {o.source} &nbsp;·&nbsp; Score: {o.score}pts'
-            f' &nbsp;·&nbsp; <a href="{o.url}" style="color:#1a5276;">View on SAM.gov</a>'
-            f'</div>'
+            f'Source: {o.source}'
+            f' &nbsp;·&nbsp; <a href="{o.url}" style="color:#1a5276;">'
+            f'View on SAM.gov</a></div>'
             '</div>'
         )
 
     return (
         '<div style="margin:20px 0 6px">'
         '<h2 style="font-size:16px;color:#111;border-bottom:2px solid #d6eaf8;'
-        'padding-bottom:5px;">📣 Industry Days, RFIs &amp; Engagement Events '
-        f'({len(engagement_opps)})</h2>'
+        f'padding-bottom:5px;">📣 Industry Days ({len(days)})</h2>'
         '<p style="font-size:12px;color:#888;margin:0 0 10px;">'
-        'All federal agency engagement events — Industry Days, Sources Sought, '
-        'RFIs, BAAs, and Market Research notices. These precede formal solicitations.</p>'
+        'All federal agency Industry Day notices — these precede formal solicitations.</p>'
         f'{rows}'
         '</div>'
     )
+
 
 
 def build_html_email(opps: list, run_date: str,
@@ -2379,7 +2356,6 @@ def build_html_email(opps: list, run_date: str,
     <table style="margin-top:8px;border-collapse:collapse;">{sc_rows}</table>
   </details>
 
-  {build_industry_days_section(opps)}
   {build_section("🟢 Strong Fit — Act Now", strong_list)}
   {build_section("🟡 Good Fit — Review Today", good_list)}
   {build_section("🔵 Possible Fit — Review These", _possible_fits(non_events, tiers, shown))}
@@ -2390,6 +2366,7 @@ def build_html_email(opps: list, run_date: str,
   {build_budget_news_section(budget_news or [])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences (Next 3 Months)", sorted(events, key=lambda x: x.score, reverse=True))}
+  {build_industry_days_section(opps)}
 </div>
 </div></body></html>"""
 
@@ -4349,6 +4326,7 @@ def build_html_email(opps: list, run_date: str,
   {build_budget_news_section(budget_news or [])}
   {build_news_section(news_items or [])}
   {build_section("🎤 Events & Conferences (Next 3 Months)", sorted(events, key=lambda x: x.score, reverse=True))}
+  {build_industry_days_section(opps)}
 </div>
 </div></body></html>"""
 
