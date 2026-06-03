@@ -699,6 +699,14 @@ def fetch_sam_gov() -> list[Opportunity]:
         ("intelligence platform",        1),
         ("data integration platform",    1),
         ("records management system",    1),
+        # Engagement events — broad federal market expansion
+        ("industry day",                 2),
+        ("sources sought data",          1),
+        ("sources sought analytics",     1),
+        ("sources sought platform",      1),
+        ("sources sought artificial intelligence", 1),
+        ("market research data analytics", 1),
+        ("broad agency announcement data", 1),
     ]
     for term, pages in KEYWORD_SEARCHES:
         if _SAM_RATE_LIMITED[0]:
@@ -796,6 +804,7 @@ def fetch_sam_gov() -> list[Opportunity]:
         "55c0c5ea5ef84232869c0134386dfa48",  # Sovereign Defense Cloud — ERDC
         "70e476afd4584a63a9890f0071e4871e",  # Additional notice
         "d32237c586bc45489644f757c52faa22",  # FBI CJIS Decentralized Info Sharing RFI
+        "7ca078ff27e24fd2b06a1553bbeadc59",  # DOJ Industry Day
     ]
     for nid in WATCH_LIST:
         if nid in seen_ids or _SAM_RATE_LIMITED[0]:
