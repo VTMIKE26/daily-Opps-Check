@@ -567,6 +567,43 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
     else:
         tier = "⚪ Low Fit"
 
+    # ── Engagement event boost ───────────────────────────────────────────────
+    # Industry Days, RFIs, Sources Sought from any federal agency surface
+    # as Possible Fit even when title has no capability keywords.
+    # Tier 1 agencies (LE/justice/defense) get a higher boost.
+    if score == 0:
+        ENGAGEMENT_SIGNALS = [
+            "industry day", "vendor day", "market survey",
+            "sources sought", "request for information",
+            "broad agency announcement", "baa",
+            "commercial solutions opening",
+            "pre-solicitation", "pre solicitation",
+            "industry engagement", "market research",
+            "notice of intent", "special notice",
+        ]
+        TIER1_LE = [
+            "department of justice", "justice,", "federal bureau",
+            "fbi", "atf", "bureau of prisons", "dea ", "drug enforcement",
+            "marshals", "court services", "csosa", "eousa",
+            "homeland security", "ice,", "immigration",
+            "customs and border", "cisa", "secret service",
+            "coast guard", "defense,", "dept of defense",
+            "army", "navy", "air force", "national guard",
+            "treasury", "fincen", "ofac",
+        ]
+        full_text = f" {opp.title} {opp.description} ".lower()
+        is_eng  = any(s in full_text for s in ENGAGEMENT_SIGNALS)
+        agency_l = opp.agency.lower()
+        is_t1   = any(a in agency_l for a in TIER1_LE)
+        if is_eng and is_t1:
+            score = 15
+            tier  = "🔵 Possible Fit"
+            reasons.append("✓ Engagement event — Tier 1 LE/Security agency: watch for follow-on RFP")
+        elif is_eng:
+            score = 5
+            tier  = "🔵 Possible Fit"
+            reasons.append("✓ Engagement event — Federal agency: potential expansion opportunity")
+
     opp.score = max(score, 0)
     opp.tier = tier
     opp.score_reasons = reasons if reasons else [
@@ -812,19 +849,28 @@ def fetch_sam_gov() -> list[Opportunity]:
         if _SAM_RATE_LIMITED[0]:
             break
         try:
-            r = requests.get(
-                "https://api.sam.gov/opportunities/v2/search",
-                params={"api_key": SAM_API_KEY, "noticeid": nid,
-                        "postedFrom": "01/01/2020", "postedTo": today_str,
-                        "limit": 10},
-                headers=HEADERS, timeout=15,
-            )
-            if r.status_code != 200:
-                print(f"[SAM.gov] Watch {nid[:8]}: HTTP {r.status_code}")
-                continue
-            items = r.json().get("opportunitiesData", [])
+            # Try multiple param combinations — workspace IDs vs notice IDs differ
+            items = []
+            for params in [
+                {"api_key": SAM_API_KEY, "noticeid": nid, "limit": 10},
+                {"api_key": SAM_API_KEY, "opportunityId": nid, "limit": 10},
+                {"api_key": SAM_API_KEY, "noticeid": nid,
+                 "postedFrom": "01/01/2020", "postedTo": today_str, "limit": 10},
+            ]:
+                try:
+                    r = requests.get(
+                        "https://api.sam.gov/opportunities/v2/search",
+                        params=params, headers=HEADERS, timeout=15,
+                    )
+                    if r.status_code == 200:
+                        found = r.json().get("opportunitiesData", [])
+                        if found:
+                            items = found
+                            break
+                except Exception:
+                    pass
             if not items:
-                print(f"[SAM.gov] Watch {nid[:8]}: no results returned")
+                print(f"[SAM.gov] Watch {nid[:8]}: not found via API — may need manual add")
                 continue
             for item in items:
                 item_nid = item.get("noticeId") or item.get("id") or ""
