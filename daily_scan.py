@@ -807,9 +807,72 @@ def fetch_sam_gov() -> list[Opportunity]:
                            f"title={term}", seen_ids, results, pages=pages):
             break
 
-    # ── Pass 3: Response deadline search — catches open notices regardless ──────
-    # of posted date or active status. Searches for notices still accepting
-    # responses. This is the most reliable way to find currently open opps.
+    # ── Pass 3a: Agency-scoped engagement event searches ─────────────────────
+    # Searches "industry day", "sources sought" etc. scoped to each priority
+    # agency so we don't miss DOJ/DCSA/FBI engagement events buried in 200+
+    # general "industry day" results across all agencies
+    ENGAGEMENT_TERMS = ["industry day", "sources sought", "request for information",
+                        "broad agency announcement", "vendor day"]
+    PRIORITY_AGENCIES = [
+        "Federal Bureau of Investigation",
+        "Defense Counterintelligence and Security Agency",
+        "Department of Justice",
+        "Alcohol, Tobacco, Firearms and Explosives",
+        "Drug Enforcement Administration",
+        "Immigration and Customs Enforcement",
+        "Cybersecurity and Infrastructure Security Agency",
+        "National Security Agency",
+        "Defense Intelligence Agency",
+        "Army Research Laboratory",
+        "Engineer Research and Development Center",
+    ]
+    for eng_term in ENGAGEMENT_TERMS:
+        for agency_name in PRIORITY_AGENCIES:
+            if _SAM_RATE_LIMITED[0]:
+                break
+            try:
+                r = requests.get(
+                    "https://api.sam.gov/opportunities/v2/search",
+                    params={"api_key": SAM_API_KEY,
+                            "keyword": eng_term,
+                            "organizationName": agency_name,
+                            "postedFrom": d90, "postedTo": to_date,
+                            "limit": 100},
+                    headers=HEADERS, timeout=15,
+                )
+                if r.status_code == 429:
+                    _SAM_RATE_LIMITED[0] = True
+                    break
+                if r.status_code != 200:
+                    continue
+                items = r.json().get("opportunitiesData", [])
+                new_c = 0
+                for item in items:
+                    nid = item.get("noticeId") or item.get("id") or ""
+                    if not nid or nid in seen_ids:
+                        continue
+                    seen_ids.add(nid)
+                    new_c += 1
+                    results.append(score_opportunity(Opportunity(
+                        title         = item.get("title", "Untitled"),
+                        notice_id     = nid,
+                        agency        = item.get("fullParentPathName") or agency_name,
+                        posted_date   = item.get("postedDate", ""),
+                        response_date = item.get("responseDeadLine") or "TBD",
+                        description   = "",
+                        url           = clean_url(f"https://sam.gov/opp/{nid}/view",
+                                                  "https://sam.gov/search"),
+                        opp_type      = item.get("type") or "Notice",
+                        source        = "SAM.gov",
+                        naics         = item.get("naicsCode", ""),
+                    )))
+                if new_c:
+                    print(f"[SAM.gov] {eng_term} @ {agency_name[:30]}: {new_c} new")
+                time.sleep(0.15)
+            except Exception as e:
+                print(f"[SAM.gov] {eng_term}/{agency_name[:20]}: {e}")
+
+    # ── Pass 3b: Response deadline search ────────────────────────────────────
     today_str  = today.strftime("%m/%d/%Y")
     future_str = (today + timedelta(days=180)).strftime("%m/%d/%Y")
     
