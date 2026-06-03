@@ -245,12 +245,17 @@ def _sam_search(params: dict, label: str, seen: set, results: list, pages: int =
             r = requests.get("https://api.sam.gov/opportunities/v2/search",
                              params=p, headers=HEADERS, timeout=20)
             if r.status_code == 429:
+                print(f"[SAM.gov] 429 Rate limited on {label}")
                 _SAM_RATE_LIMITED[0] = True
                 return False
             if r.status_code != 200:
+                print(f"[SAM.gov] HTTP {r.status_code} on {label}: {r.text[:200]}")
                 return True
             data  = r.json()
+            total = data.get("totalRecords", 0)
             items = data.get("opportunitiesData", [])
+            if page == 0:
+                print(f"[SAM.gov] {label}: totalRecords={total}, returned={len(items)}")
             new_n = 0
             for item in items:
                 nid = item.get("noticeId") or item.get("id") or ""
