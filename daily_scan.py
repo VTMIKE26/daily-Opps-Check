@@ -245,9 +245,19 @@ def _sam_search(params: dict, label: str, seen: set, results: list, pages: int =
             r = requests.get("https://api.sam.gov/opportunities/v2/search",
                              params=p, headers=HEADERS, timeout=20)
             if r.status_code == 429:
-                print(f"[SAM.gov] 429 Rate limited on {label}")
-                _SAM_RATE_LIMITED[0] = True
-                return False
+                retry_after = int(r.headers.get("Retry-After", 60))
+                print(f"[SAM.gov] 429 on {label} — waiting {retry_after}s then retrying")
+                time.sleep(retry_after)
+                # Retry once after waiting
+                r = requests.get("https://api.sam.gov/opportunities/v2/search",
+                                 params=p, headers=HEADERS, timeout=20)
+                if r.status_code == 429:
+                    print(f"[SAM.gov] Still rate limited after wait — skipping remaining calls")
+                    _SAM_RATE_LIMITED[0] = True
+                    return False
+                if r.status_code != 200:
+                    print(f"[SAM.gov] HTTP {r.status_code} after retry on {label}")
+                    return True
             if r.status_code != 200:
                 print(f"[SAM.gov] HTTP {r.status_code} on {label}: {r.text[:200]}")
                 return True
@@ -304,7 +314,7 @@ def fetch_sam_gov() -> list:
                         ("k","Combined Synopsis"),("s","Special Notice"),
                         ("o","Solicitation"),("i","Intent to Bundle")]:
         if not _sam_search({"ptype": ptype, "postedFrom": d30, "postedTo": to_date},
-                           lbl, seen, results, pages=4):
+                           lbl, seen, results, pages=2):
             break
 
     # Pass 2: keyword searches
@@ -314,7 +324,7 @@ def fetch_sam_gov() -> list:
         ("investigative analytics", 1), ("law enforcement analytics", 1),
         ("offender management system", 1), ("community supervision", 1),
         ("intelligence platform", 1), ("records management system", 1),
-        ("industry day", 10), ("sources sought data", 1),
+        ("industry day", 3), ("sources sought data", 1),
         ("broad agency announcement", 3),
     ]:
         if _SAM_RATE_LIMITED[0]: break
@@ -825,27 +835,59 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
 
 
 def send_email(html: str, subject: str):
-    print(f"[Email] To:{EMAIL_TO} | Key:{'SET' if SENDGRID_API_KEY else 'NOT SET'}")
-    if not all([SENDGRID_API_KEY, EMAIL_TO, EMAIL_FROM]):
-        print("[Email] SKIPPED — missing config")
-        return
-    try:
-        r = requests.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {SENDGRID_API_KEY}",
-                     "Content-Type": "application/json"},
-            json={"personalizations": [{"to": [{"email": EMAIL_TO}]}],
-                  "from": {"email": EMAIL_FROM, "name": "Peregrine Federal Scanner"},
-                  "subject": subject,
-                  "content": [{"type": "text/html", "value": html}]},
-            timeout=30,
-        )
-        if r.status_code in (200, 202):
-            print(f"[Email] Sent OK (HTTP {r.status_code})")
-        else:
-            print(f"[Email] Failed: {r.status_code} {r.text[:200]}")
-    except Exception as e:
-        print(f"[Email] Error: {e}")
+    """
+    Send via Gmail SMTP first (most reliable for personal inbox delivery),
+    fall back to SendGrid if Gmail credentials not set.
+    
+    Gmail setup: generate an App Password at
+    myaccount.google.com/apppasswords (requires 2FA enabled)
+    Then set GMAIL_APP_PASSWORD secret in GitHub Actions.
+    """
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+    print(f"[Email] To:{EMAIL_TO} | Gmail:{'SET' if GMAIL_APP_PASSWORD else 'NOT SET'} | SendGrid:{'SET' if SENDGRID_API_KEY else 'NOT SET'}")
+
+    # Method 1: Gmail SMTP — goes straight to inbox, never spam
+    if GMAIL_APP_PASSWORD and EMAIL_FROM and EMAIL_TO:
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = f"Peregrine Federal Scanner <{EMAIL_FROM}>"
+            msg["To"]      = EMAIL_TO
+            msg.attach(MIMEText(html, "html"))
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(EMAIL_FROM, GMAIL_APP_PASSWORD)
+                server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+            print(f"[Email] Sent via Gmail SMTP OK")
+            return
+        except Exception as e:
+            print(f"[Email] Gmail SMTP failed: {e} — trying SendGrid")
+
+    # Method 2: SendGrid fallback
+    if SENDGRID_API_KEY and EMAIL_TO and EMAIL_FROM:
+        try:
+            r = requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={"Authorization": f"Bearer {SENDGRID_API_KEY}",
+                         "Content-Type": "application/json"},
+                json={"personalizations": [{"to": [{"email": EMAIL_TO}]}],
+                      "from": {"email": EMAIL_FROM, "name": "Peregrine Federal Scanner"},
+                      "subject": subject,
+                      "content": [{"type": "text/html", "value": html}]},
+                timeout=30,
+            )
+            if r.status_code in (200, 202):
+                print(f"[Email] Sent via SendGrid OK (HTTP {r.status_code})")
+            else:
+                print(f"[Email] SendGrid failed: {r.status_code} {r.text[:200]}")
+        except Exception as e:
+            print(f"[Email] SendGrid error: {e}")
+    else:
+        print("[Email] SKIPPED — no email credentials set")
 
 
 def main():
