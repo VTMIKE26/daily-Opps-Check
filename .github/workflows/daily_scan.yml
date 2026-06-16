@@ -36,6 +36,7 @@ jobs:
         env:
           SAM_API_KEY:      ${{ secrets.SAM_API_KEY }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_TO:         mike.kelly@peregrine.io
           EMAIL_FROM:       mikefkelly26@gmail.com
         run: python daily_scan.py
