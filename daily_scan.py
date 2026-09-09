@@ -453,6 +453,28 @@ DOD_FRAGS = ["dept of defense","department of defense","army","navy",
              "defense intelligence","dcsa","darpa","erdc",
              "army research","defense advanced"]
 
+# Beyond DOJ/DHS/DoD: financial-crimes, investigative, and oversight bodies
+# whose mission profile fits Peregrine's capability clusters (entity
+# resolution, investigative analytics, evidence/case management, data
+# fusion) even though they sit outside our core three agency groups.
+OTHER_FRAGS = ["department of treasury","department of the treasury",
+               "financial crimes enforcement","fincen",
+               "internal revenue service","irs",
+               "department of state","diplomatic security",
+               "postal service","postal inspection",
+               "veterans affairs","inspector general",
+               "health and human services","hhs",
+               "social security administration",
+               "department of labor",
+               "department of transportation",
+               "department of the interior",
+               "department of commerce",
+               "general services administration",
+               "securities and exchange commission","sec",
+               "federal trade commission","ftc",
+               "consumer financial protection bureau","cfpb",
+               "environmental protection agency","epa"]
+
 def fetch_doj_opportunities() -> list:
     return _agency_sweep([
         "Department of Justice",
@@ -484,6 +506,30 @@ def fetch_dod_opportunities() -> list:
         "Engineer Research and Development Center",
         "Defense Advanced Research Projects Agency",
     ], "DoD", lambda a: any(f in a.lower() for f in DOD_FRAGS))
+
+def fetch_other_agencies() -> list:
+    """Targeted sweep across financial-crimes, investigative, and
+    oversight agencies government-wide (outside DOJ/DHS/DoD)."""
+    return _agency_sweep([
+        "Department of the Treasury",
+        "Financial Crimes Enforcement Network",
+        "Internal Revenue Service",
+        "Department of State",
+        "United States Postal Service",
+        "Office of Inspector General",              # catches many agency-specific OIGs
+        "Department of Veterans Affairs",
+        "Department of Health and Human Services",
+        "Social Security Administration",
+        "Department of Labor",
+        "Department of Transportation",
+        "Department of the Interior",
+        "Department of Commerce",
+        "General Services Administration",
+        "Securities and Exchange Commission",
+        "Federal Trade Commission",
+        "Consumer Financial Protection Bureau",
+        "Environmental Protection Agency",
+    ], "Other-Agencies", lambda a: any(f in a.lower() for f in OTHER_FRAGS))
 
 
 def fetch_competitor_intel() -> list:
@@ -838,7 +884,7 @@ def send_email(html: str, subject: str):
     """
     Send via Gmail SMTP first (most reliable for personal inbox delivery),
     fall back to SendGrid if Gmail credentials not set.
-    
+
     Gmail setup: generate an App Password at
     myaccount.google.com/apppasswords (requires 2FA enabled)
     Then set GMAIL_APP_PASSWORD secret in GitHub Actions.
@@ -900,10 +946,11 @@ def main():
     all_opps      = []
 
     for label, fn in [
-        ("SAM.gov",  fetch_sam_gov),
-        ("DOJ",      fetch_doj_opportunities),
-        ("DHS",      fetch_dhs_opportunities),
-        ("DoD",      fetch_dod_opportunities),
+        ("SAM.gov",        fetch_sam_gov),
+        ("DOJ",            fetch_doj_opportunities),
+        ("DHS",            fetch_dhs_opportunities),
+        ("DoD",            fetch_dod_opportunities),
+        ("Other-Agencies", fetch_other_agencies),
     ]:
         print(f"\n[{label}] Fetching...")
         try:
