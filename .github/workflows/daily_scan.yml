@@ -16,6 +16,9 @@ concurrency:
   group: peregrine-daily-scanner
   cancel-in-progress: false
 
+permissions:
+  contents: write   # needed so the "Persist seen-IDs state" step can push seen_ids.json back
+
 jobs:
   daily-scan:
     runs-on: ubuntu-latest
@@ -40,6 +43,28 @@ jobs:
           EMAIL_TO:         mike.kelly@peregrine.io
           EMAIL_FROM:       mikefkelly26@gmail.com
         run: python daily_scan.py
+
+      - name: Persist seen-IDs state
+        # Commits seen_ids.json (the "have we shown this notice before?"
+        # tracker behind the New Today section) back to the repo so tomorrow's
+        # run can compare against it. if: always() so a partial/failed scan
+        # still saves whatever state the script managed to write before it
+        # died; the git diff check below is a no-op if nothing changed.
+        if: always()
+        run: |
+          if [ -f seen_ids.json ]; then
+            git config user.name "peregrine-scanner-bot"
+            git config user.email "actions@github.com"
+            git add seen_ids.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Update seen_ids.json [skip ci]"
+              git push
+            else
+              echo "No change to seen_ids.json — skipping commit"
+            fi
+          else
+            echo "seen_ids.json not found — scanner likely failed before writing it"
+          fi
 
       - name: Upload digest
         if: always()
