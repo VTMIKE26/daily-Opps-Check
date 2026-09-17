@@ -34,6 +34,7 @@ class Opportunity:
     score:         int  = 0
     tier:          str  = ""
     score_reasons: list = field(default_factory=list)
+    is_new:        bool = False
 
 CAPABILITY_CLUSTERS = [
     ("Data Integration & Unification", 20, [
@@ -96,6 +97,9 @@ CAPABILITY_CLUSTERS = [
         "it modernization", "digital transformation", "cloud migration",
         "system replacement", "palantir", "niche", "xhibit",
         "commercial solutions opening", "sovereign cloud", "defense cloud",
+    ]),
+    ("Ontology & Semantic Modeling", 40, [
+        "ontology", "ontologies",
     ]),
     ("AI & Machine Learning", 22, [
         "artificial intelligence", "machine learning",
@@ -684,6 +688,81 @@ def deduplicate_and_rank(opps: list) -> list:
     return out
 
 
+# ---- Cross-run "seen before" tracking ----------------------------------
+# Persisted to a small JSON file (committed back to the repo each run, same
+# pattern as keep_alive.yml) so the scanner can tell "posted today" apart
+# from "showed up in a previous digest." Without this, every run starts
+# from a blank slate and there's no way to flag what's genuinely new.
+SEEN_IDS_PATH    = "seen_ids.json"
+SEEN_RETENTION_DAYS = 120
+
+
+def _opp_key(o: Opportunity) -> str:
+    return o.notice_id or o.title[:60].lower()
+
+
+def load_seen_ids() -> dict:
+    """Returns {} if the file doesn't exist yet OR is unreadable.
+    Callers distinguish "first run" via os.path.exists() before calling this,
+    since an empty {} is also the legitimate post-pruning steady state."""
+    if not os.path.exists(SEEN_IDS_PATH):
+        return {}
+    try:
+        with open(SEEN_IDS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[SeenIDs] Could not read {SEEN_IDS_PATH}: {e} — treating as empty")
+        return {}
+
+
+def save_seen_ids(seen: dict) -> None:
+    try:
+        with open(SEEN_IDS_PATH, "w", encoding="utf-8") as f:
+            json.dump(seen, f, indent=0, sort_keys=True)
+    except OSError as e:
+        print(f"[SeenIDs] Could not write {SEEN_IDS_PATH}: {e}")
+
+
+def mark_new_and_update_seen(ranked: list, today: datetime) -> list:
+    """Mutates each Opportunity's is_new flag, updates + prunes the seen
+    store, writes it back to disk, and returns the list of newly-seen
+    opportunities (in the same score order as `ranked`).
+
+    On a genuine first run (no state file on disk yet), nothing is flagged
+    as new — otherwise the very first email would show every result as
+    "new," which is noise rather than signal. The state file is still
+    seeded with today's IDs so tomorrow's run has something to compare against.
+    """
+    first_run = not os.path.exists(SEEN_IDS_PATH)
+    seen = load_seen_ids()
+    today_str = today.strftime("%Y-%m-%d")
+
+    new_today = []
+    for o in ranked:
+        key = _opp_key(o)
+        if key not in seen:
+            if not first_run:
+                o.is_new = True
+                new_today.append(o)
+            seen[key] = today_str
+
+    cutoff = today - timedelta(days=SEEN_RETENTION_DAYS)
+    pruned = {}
+    for k, v in seen.items():
+        try:
+            if datetime.strptime(v, "%Y-%m-%d") >= cutoff:
+                pruned[k] = v
+        except ValueError:
+            pruned[k] = v  # keep anything with an unexpected date format rather than lose it silently
+
+    save_seen_ids(pruned)
+    if first_run:
+        print(f"[SeenIDs] First run — seeded {len(pruned)} IDs, nothing flagged as new")
+    else:
+        print(f"[SeenIDs] {len(new_today)} new today · {len(pruned)} tracked total (pruned to {SEEN_RETENTION_DAYS}d)")
+    return new_today
+
+
 def build_opps_html(title: str, opps: list, color: str) -> str:
     if not opps:
         return ""
@@ -725,6 +804,37 @@ def build_opps_html(title: str, opps: list, color: str) -> str:
     return (f'<div style="margin:20px 0 6px">'
             f'<h2 style="font-size:16px;color:#222;border-bottom:2px solid {color};'
             f'padding-bottom:5px;">{title} ({len(opps)})</h2>{rows}</div>')
+
+
+def build_new_today_html(new_today: list) -> str:
+    if not new_today:
+        return ""
+    rows = ""
+    for o in new_today[:50]:
+        link = (f'<a href="{o.url}" style="font-weight:700;font-size:14px;'
+                f'color:#0057b8;text-decoration:none;">{o.title[:120]}</a>'
+                if o.url else
+                f'<b style="font-size:14px;">{o.title[:120]}</b>')
+        rows += (
+            f'<div style="border:1px solid #e0d4f7;border-radius:6px;padding:12px;'
+            f'margin-bottom:10px;background:#f7f2fc;">'
+            f'<div style="margin-bottom:5px;">{link} '
+            f'<span style="background:#8e44ad;color:#fff;font-size:10px;'
+            f'padding:1px 6px;border-radius:8px;">NEW</span></div>'
+            f'<div style="font-size:12px;color:#666;">&#x1F3DB; {o.agency[:80]}'
+            f' &nbsp;&middot;&nbsp; &#x1F4EC; {o.posted_date[:10]}'
+            f' &nbsp;&middot;&nbsp; Tier: {o.tier} ({o.score}pts)</div>'
+            f'<div style="font-size:11px;color:#999;margin-top:2px;">'
+            f'Source: {o.source} &nbsp;&middot;&nbsp; '
+            f'<a href="{o.url}" style="color:#0057b8;">View</a>'
+            f'</div></div>'
+        )
+    return (f'<div style="margin:20px 0 6px">'
+            f'<h2 style="font-size:16px;color:#222;border-bottom:2px solid #8e44ad;'
+            f'padding-bottom:5px;">&#x1F195; New Today ({len(new_today)})</h2>'
+            f'<p style="font-size:12px;color:#888;margin:0 0 8px;">'
+            f'First appeared in today\'s run — across every tier, not seen in a prior digest.</p>'
+            f'{rows}</div>')
 
 
 def build_industry_days_html(opps: list) -> str:
@@ -817,7 +927,8 @@ def build_news_html(items: list, title: str) -> str:
 
 def build_email(ranked: list, run_date: str, source_counts: dict,
                 competitor_items: list, news_items: list,
-                budget_news: list) -> str:
+                budget_news: list, new_today: list = None) -> str:
+    new_today = new_today or []
 
     def _k(o): return (o.notice_id or o.title[:60].lower()).strip()
     def _dedup(lst):
@@ -843,7 +954,7 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
         for k, v in sorted(source_counts.items())
     )
 
-    ns = len(strong); ng = len(good); np = len(possible)
+    ns = len(strong); ng = len(good); np = len(possible); nn = len(new_today)
 
     return (
         '<!DOCTYPE html><html><head><meta charset="utf-8">'
@@ -859,6 +970,7 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
         '<div style="font-size:22px;font-weight:700;">&#x1F985; Peregrine Daily Scanner</div>'
         f'<div style="font-size:14px;opacity:0.85;margin-top:4px;">{run_date}</div>'
         '<div style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;">'
+        f'<span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">&#x1F195; {nn} New</span>'
         f'<span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">&#x1F7E2; {ns} Strong</span>'
         f'<span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">&#x1F7E1; {ng} Good</span>'
         f'<span style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">&#x1F535; {np} Possible</span>'
@@ -868,6 +980,7 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
         '<summary style="font-size:12px;color:#888;cursor:pointer;">Sources searched today</summary>'
         f'<table style="margin-top:8px;border-collapse:collapse;">{sc_rows}</table>'
         '</details>'
+        + build_new_today_html(new_today)
         + build_opps_html("&#x1F7E2; Strong Fit &#x2014; Act Now", strong, "#27ae60")
         + build_opps_html("&#x1F7E1; Good Fit &#x2014; Review Today", good, "#f39c12")
         + build_opps_html("&#x1F535; Possible Fit &#x2014; Review These", possible, "#2980b9")
@@ -968,6 +1081,9 @@ def main():
     np = sum(1 for o in ranked if o.tier == "Possible")
     print(f"[Tiers] Strong:{ns}  Good:{ng}  Possible:{np}")
 
+    print("\n[SeenIDs] Checking for new-since-last-run...")
+    new_today = mark_new_and_update_seen(ranked, today)
+
     print("\n[Competitor Intel] Fetching...")
     try:
         competitor_items = fetch_competitor_intel()
@@ -992,15 +1108,16 @@ def main():
         print(f"[Budget News] FAILED: {e}")
         budget_news = []
 
+    new_prefix = f"{len(new_today)} New · " if new_today else ""
     if ns >= 1:
-        subject = f"Peregrine Daily Scanner | {ns} Strong · {ng} Good · {np} Possible | {today.strftime('%b %d')}"
+        subject = f"Peregrine Daily Scanner | {new_prefix}{ns} Strong · {ng} Good · {np} Possible | {today.strftime('%b %d')}"
     elif ng >= 1:
-        subject = f"Peregrine Daily Scanner | {ng} Good · {np} Possible | {today.strftime('%b %d')}"
+        subject = f"Peregrine Daily Scanner | {new_prefix}{ng} Good · {np} Possible | {today.strftime('%b %d')}"
     else:
-        subject = f"Peregrine Daily Scanner | No Strong Matches | {today.strftime('%b %d')}"
+        subject = f"Peregrine Daily Scanner | {new_prefix}No Strong Matches | {today.strftime('%b %d')}"
 
     html = build_email(ranked, run_date, source_counts,
-                       competitor_items, news_items, budget_news)
+                       competitor_items, news_items, budget_news, new_today)
     print(f"\n[Email] HTML: {len(html):,} chars | Subject: {subject}")
     send_email(html, subject)
 
