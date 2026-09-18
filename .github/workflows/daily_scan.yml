@@ -44,26 +44,28 @@ jobs:
           EMAIL_FROM:       mikefkelly26@gmail.com
         run: python daily_scan.py
 
-      - name: Persist seen-IDs state
-        # Commits seen_ids.json (the "have we shown this notice before?"
-        # tracker behind the New Today section) back to the repo so tomorrow's
-        # run can compare against it. if: always() so a partial/failed scan
-        # still saves whatever state the script managed to write before it
-        # died; the git diff check below is a no-op if nothing changed.
+      - name: Persist previous-run snapshot
+        # Commits previous_run_ids.json (the "was this in yesterday's run?"
+        # snapshot behind the New Today section) back to the repo so
+        # tomorrow's run has something to diff against. This file is
+        # OVERWRITTEN each run, not accumulated — it only ever reflects the
+        # single most recent run. if: always() so a partial/failed scan
+        # still saves whatever the script managed to write before it died;
+        # the git diff check below is a no-op if nothing changed.
         if: always()
         run: |
-          if [ -f seen_ids.json ]; then
+          if [ -f previous_run_ids.json ]; then
             git config user.name "peregrine-scanner-bot"
             git config user.email "actions@github.com"
-            git add seen_ids.json
+            git add previous_run_ids.json
             if ! git diff --cached --quiet; then
-              git commit -m "Update seen_ids.json [skip ci]"
+              git commit -m "Update previous_run_ids.json [skip ci]"
               git push
             else
-              echo "No change to seen_ids.json — skipping commit"
+              echo "No change to previous_run_ids.json — skipping commit"
             fi
           else
-            echo "seen_ids.json not found — scanner likely failed before writing it"
+            echo "previous_run_ids.json not found — scanner likely failed before writing it"
           fi
 
       - name: Upload digest
