@@ -688,78 +688,68 @@ def deduplicate_and_rank(opps: list) -> list:
     return out
 
 
-# ---- Cross-run "seen before" tracking ----------------------------------
-# Persisted to a small JSON file (committed back to the repo each run, same
-# pattern as keep_alive.yml) so the scanner can tell "posted today" apart
-# from "showed up in a previous digest." Without this, every run starts
-# from a blank slate and there's no way to flag what's genuinely new.
-SEEN_IDS_PATH    = "seen_ids.json"
-SEEN_RETENTION_DAYS = 120
+# ---- "Different from yesterday's run" tracking -------------------------
+# Persisted as a single snapshot of the previous run's notice IDs (committed
+# back to the repo each run, same pattern as keep_alive.yml) — overwritten
+# every run, not accumulated. This deliberately does NOT keep a rolling
+# history: something flagged new yesterday and shown again today is NOT
+# flagged new again, but the file itself only ever reflects "what was in
+# the last run," so nothing lingers or grows over time.
+PREVIOUS_RUN_PATH = "previous_run_ids.json"
 
 
 def _opp_key(o: Opportunity) -> str:
     return o.notice_id or o.title[:60].lower()
 
 
-def load_seen_ids() -> dict:
-    """Returns {} if the file doesn't exist yet OR is unreadable.
-    Callers distinguish "first run" via os.path.exists() before calling this,
-    since an empty {} is also the legitimate post-pruning steady state."""
-    if not os.path.exists(SEEN_IDS_PATH):
-        return {}
+def load_previous_run_ids():
+    """Returns None if there's no previous run on file yet (first run ever,
+    or the file is unreadable) — distinct from a legitimate empty list."""
+    if not os.path.exists(PREVIOUS_RUN_PATH):
+        return None
     try:
-        with open(SEEN_IDS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(PREVIOUS_RUN_PATH, "r", encoding="utf-8") as f:
+            return set(json.load(f))
     except (json.JSONDecodeError, OSError) as e:
-        print(f"[SeenIDs] Could not read {SEEN_IDS_PATH}: {e} — treating as empty")
-        return {}
+        print(f"[PreviousRun] Could not read {PREVIOUS_RUN_PATH}: {e} — treating as first run")
+        return None
 
 
-def save_seen_ids(seen: dict) -> None:
+def save_current_run_ids(ranked: list) -> None:
+    ids = sorted({_opp_key(o) for o in ranked})
     try:
-        with open(SEEN_IDS_PATH, "w", encoding="utf-8") as f:
-            json.dump(seen, f, indent=0, sort_keys=True)
+        with open(PREVIOUS_RUN_PATH, "w", encoding="utf-8") as f:
+            json.dump(ids, f)
     except OSError as e:
-        print(f"[SeenIDs] Could not write {SEEN_IDS_PATH}: {e}")
+        print(f"[PreviousRun] Could not write {PREVIOUS_RUN_PATH}: {e}")
 
 
-def mark_new_and_update_seen(ranked: list, today: datetime) -> list:
-    """Mutates each Opportunity's is_new flag, updates + prunes the seen
-    store, writes it back to disk, and returns the list of newly-seen
-    opportunities (in the same score order as `ranked`).
+def mark_new_vs_previous_run(ranked: list) -> list:
+    """Mutates each Opportunity's is_new flag based on whether it appeared
+    in the immediately-previous run (not any longer history), then
+    overwrites the snapshot with today's full ID set. Returns the newly
+    appearing opportunities in the same score order as `ranked`.
 
-    On a genuine first run (no state file on disk yet), nothing is flagged
-    as new — otherwise the very first email would show every result as
-    "new," which is noise rather than signal. The state file is still
-    seeded with today's IDs so tomorrow's run has something to compare against.
+    On a genuine first run (no snapshot on disk yet), nothing is flagged as
+    new — otherwise the very first email would show every result as "new."
     """
-    first_run = not os.path.exists(SEEN_IDS_PATH)
-    seen = load_seen_ids()
-    today_str = today.strftime("%Y-%m-%d")
+    previous_ids = load_previous_run_ids()
+    first_run = previous_ids is None
+    if first_run:
+        previous_ids = set()
 
     new_today = []
     for o in ranked:
-        key = _opp_key(o)
-        if key not in seen:
+        if _opp_key(o) not in previous_ids:
             if not first_run:
                 o.is_new = True
                 new_today.append(o)
-            seen[key] = today_str
 
-    cutoff = today - timedelta(days=SEEN_RETENTION_DAYS)
-    pruned = {}
-    for k, v in seen.items():
-        try:
-            if datetime.strptime(v, "%Y-%m-%d") >= cutoff:
-                pruned[k] = v
-        except ValueError:
-            pruned[k] = v  # keep anything with an unexpected date format rather than lose it silently
-
-    save_seen_ids(pruned)
+    save_current_run_ids(ranked)
     if first_run:
-        print(f"[SeenIDs] First run — seeded {len(pruned)} IDs, nothing flagged as new")
+        print(f"[PreviousRun] First run — seeded {len(ranked)} IDs, nothing flagged as new")
     else:
-        print(f"[SeenIDs] {len(new_today)} new today · {len(pruned)} tracked total (pruned to {SEEN_RETENTION_DAYS}d)")
+        print(f"[PreviousRun] {len(new_today)} new vs. previous run · {len(ranked)} in this run's snapshot")
     return new_today
 
 
@@ -833,7 +823,7 @@ def build_new_today_html(new_today: list) -> str:
             f'<h2 style="font-size:16px;color:#222;border-bottom:2px solid #8e44ad;'
             f'padding-bottom:5px;">&#x1F195; New Today ({len(new_today)})</h2>'
             f'<p style="font-size:12px;color:#888;margin:0 0 8px;">'
-            f'First appeared in today\'s run — across every tier, not seen in a prior digest.</p>'
+            f'Wasn\'t in yesterday\'s run — across every tier.</p>'
             f'{rows}</div>')
 
 
@@ -1081,8 +1071,8 @@ def main():
     np = sum(1 for o in ranked if o.tier == "Possible")
     print(f"[Tiers] Strong:{ns}  Good:{ng}  Possible:{np}")
 
-    print("\n[SeenIDs] Checking for new-since-last-run...")
-    new_today = mark_new_and_update_seen(ranked, today)
+    print("\n[PreviousRun] Checking against previous run's snapshot...")
+    new_today = mark_new_vs_previous_run(ranked)
 
     print("\n[Competitor Intel] Fetching...")
     try:
