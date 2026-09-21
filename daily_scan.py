@@ -681,6 +681,7 @@ def deduplicate_and_rank(opps: list) -> list:
     seen, out = set(), []
     for o in sorted(opps, key=lambda x: x.score, reverse=True):
         if is_expired(o): continue
+        if o.score <= 0: continue  # drop zero-score (and excluded) opportunities entirely — pure noise
         key = o.notice_id or o.title[:60].lower()
         if key not in seen:
             seen.add(key)
@@ -935,8 +936,6 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
     shown.update(_k(o) for o in good)
     possible = _dedup([o for o in ranked if o.tier == "Possible" and _k(o) not in shown])
     shown.update(_k(o) for o in possible)
-    low = _dedup([o for o in ranked
-                  if o.tier == "Low" and o.score > 0 and _k(o) not in shown])
 
     sc_rows = "".join(
         f'<tr><td style="padding:3px 10px;font-size:12px;color:#555;">{k}</td>'
@@ -974,7 +973,6 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
         + build_opps_html("&#x1F7E2; Strong Fit &#x2014; Act Now", strong, "#27ae60")
         + build_opps_html("&#x1F7E1; Good Fit &#x2014; Review Today", good, "#f39c12")
         + build_opps_html("&#x1F535; Possible Fit &#x2014; Review These", possible, "#2980b9")
-        + build_opps_html("&#x26AA; Low Fit &#x2014; Any Keyword Match", low[:20], "#95a5a6")
         + build_competitor_html(competitor_items)
         + build_news_html(budget_news, "&#x1F4E1; Agency Budget &amp; Spending Signals")
         + build_news_html(news_items, "&#x1F4F0; Industry News")
