@@ -119,6 +119,9 @@ HARD_EXCLUSIONS = [
     "lift maintenance", "elevator maintenance",
     "uniform supply", "stationery", "office furniture", "catering",
     "food supply", "medical supplies", "pharmaceutical", "laundry",
+    "medical device", "clinical trial", "diagnostic imaging", "endoscopy",
+    "radiology equipment", "surgical equipment", "medical imaging",
+    "patient monitoring", "clinical decision support",
     "body armour", "body armor", "taser", "firearms", "ammunition",
     "vehicle purchase", "vehicle fleet", "fleet procurement",
     "fleet management", "radio procurement",
@@ -142,7 +145,15 @@ TIER_STRONG = 40
 TIER_GOOD   = 15
 
 NAICS_HINTS = {
-    "541": "software IT services data analytics platform",
+    # NOTE: a blanket "541" (Professional, Scientific & Technical Services)
+    # entry used to live here. That NAICS prefix is a huge catch-all —
+    # covers engineering services, advertising/graphic design, R&D, legal,
+    # accounting, etc. — and its hint text ("...data analytics platform")
+    # matched the Data Integration cluster's own phrase unconditionally,
+    # giving a free +20 to almost anything coded under NAICS 541-anything
+    # regardless of actual content (e.g. weather-radar engineering support,
+    # bus-wrapping ad contracts). Removed. Keep NAICS hints narrow and
+    # specific — broad hints self-match and defeat the scoring model.
     "5415": "computer systems design data integration analytics platform",
     "518":  "cloud computing data processing hosting",
     "922":  "law enforcement criminal justice public safety records",
@@ -806,6 +817,11 @@ def build_new_today_html(new_today: list) -> str:
                 f'color:#0057b8;text-decoration:none;">{o.title[:120]}</a>'
                 if o.url else
                 f'<b style="font-size:14px;">{o.title[:120]}</b>')
+        reasons_html = ""
+        if o.score_reasons:
+            bullets = "".join(f"<li>{r}</li>" for r in o.score_reasons[:4])
+            reasons_html = (f'<ul style="margin:4px 0 0;padding-left:16px;'
+                            f'font-size:12px;color:#555;">{bullets}</ul>')
         rows += (
             f'<div style="border:1px solid #e0d4f7;border-radius:6px;padding:12px;'
             f'margin-bottom:10px;background:#f7f2fc;">'
@@ -818,7 +834,7 @@ def build_new_today_html(new_today: list) -> str:
             f'<div style="font-size:11px;color:#999;margin-top:2px;">'
             f'Source: {o.source} &nbsp;&middot;&nbsp; '
             f'<a href="{o.url}" style="color:#0057b8;">View</a>'
-            f'</div></div>'
+            f'</div>{reasons_html}</div>'
         )
     return (f'<div style="margin:20px 0 6px">'
             f'<h2 style="font-size:16px;color:#222;border-bottom:2px solid #8e44ad;'
