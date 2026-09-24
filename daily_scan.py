@@ -228,15 +228,31 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
             "dept of defense", "army", "navy", "air force",
             "national guard", "treasury", "fincen", "ofac",
         ]
+        # Being an early-stage notice (sources sought / industry day / etc.)
+        # from a Tier-1 agency used to be enough on its own to earn a small
+        # "watch" score — but that fires just as readily on pure hardware
+        # (gyros, thermal cameras, gas generators) as on anything software-
+        # or data-related. Require at least one minimal tech-relevance
+        # signal in the text too, so a hardware-only sources-sought notice
+        # doesn't clear the bar just for existing at a Tier-1 agency.
+        TECH_HINTS = [
+            "information technology", "it modernization", "software",
+            "data management", "data integration", "data analytics",
+            "digital transformation", "cyber", "platform", "analytics",
+            "cloud computing", "artificial intelligence", "machine learning",
+            "automation", "system modernization", "enterprise system",
+            "database", "application development", "technology refresh",
+        ]
         full_text = f" {opp.title} {opp.description} ".lower()
-        is_eng = any(s in full_text for s in ENGAGEMENT)
-        is_t1  = any(a in opp.agency.lower() for a in TIER1)
-        if is_eng and is_t1:
+        is_eng  = any(s in full_text for s in ENGAGEMENT)
+        is_t1   = any(a in opp.agency.lower() for a in TIER1)
+        is_tech = any(s in full_text for s in TECH_HINTS)
+        if is_eng and is_tech and is_t1:
             total = 15
-            reasons = ["+ Engagement event — Tier 1 LE/Security agency: watch for follow-on RFP"]
-        elif is_eng:
+            reasons = ["+ Engagement event (tech-related) — Tier 1 LE/Security agency: watch for follow-on RFP"]
+        elif is_eng and is_tech:
             total = 5
-            reasons = ["+ Engagement event — Federal agency"]
+            reasons = ["+ Engagement event (tech-related) — Federal agency"]
 
     opp.score = total
     opp.score_reasons = reasons
