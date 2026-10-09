@@ -53,6 +53,8 @@ CAPABILITY_CLUSTERS = [
         "intelligence platform", "predictive analytics",
         "geospatial analysis", "digital evidence",
         "evidence management platform", "digital forensics platform",
+        "advanced analytics", "investigative techniques",
+        "investigative capabilities", "lead development",
     ]),
     ("Federated & Enterprise Search", 20, [
         "federated search", "enterprise search", "cross-system search",
@@ -109,6 +111,9 @@ CAPABILITY_CLUSTERS = [
         "procurement fraud", "fraud waste and abuse",
         "fraud, waste, and abuse", "financial crime detection",
         "false claims", "fraud scheme", "fraud mitigation",
+        "program integrity", "payment suspension",
+        "unified program integrity contractor", "upic",
+        "medicare program integrity", "medicaid program integrity",
     ]),
     ("AI & Machine Learning", 22, [
         "artificial intelligence", "machine learning",
