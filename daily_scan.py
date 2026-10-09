@@ -353,6 +353,7 @@ def fetch_sam_gov() -> list:
     to_date = today.strftime("%m/%d/%Y")
     d30     = (today - timedelta(days=30)).strftime("%m/%d/%Y")
     d90     = (today - timedelta(days=90)).strftime("%m/%d/%Y")
+    d180    = (today - timedelta(days=180)).strftime("%m/%d/%Y")
 
     # Pass 1: ptype sweeps
     for ptype, lbl in [("r","Sources Sought"),("p","Presolicitation"),
@@ -369,12 +370,28 @@ def fetch_sam_gov() -> list:
         ("investigative analytics", 1), ("law enforcement analytics", 1),
         ("offender management system", 1), ("community supervision", 1),
         ("intelligence platform", 1), ("records management system", 1),
-        ("industry day", 3), ("sources sought data", 1),
+        ("sources sought data", 1),
         ("broad agency announcement", 3),
     ]:
         if _SAM_RATE_LIMITED[0]: break
         _sam_search({"keyword": term, "postedFrom": d90, "postedTo": to_date},
                     f"kw={term}", seen, results, pages=pages)
+
+    # Pass 2b: industry-day / vendor-engagement sweep — wider window (180d)
+    # and more phrasing variants, since these are time-sensitive (BD wants
+    # to know about them well before the date) and get announced under a
+    # lot of different names, not just the literal phrase "industry day".
+    for term, pages in [
+        ("industry day", 5), ("vendor day", 3), ("industry engagement", 2),
+        ("pre-proposal conference", 2), ("virtual industry day", 2),
+        ("capability briefing", 2), ("networking event industry", 2),
+        ("industry open house", 2), ("vendor outreach session", 2),
+    ]:
+        if _SAM_RATE_LIMITED[0]: break
+        _sam_search({"keyword": term, "postedFrom": d180, "postedTo": to_date},
+                    f"kw={term}", seen, results, pages=pages)
+        _sam_search({"title": term, "postedFrom": d180, "postedTo": to_date},
+                    f"title={term}", seen, results, pages=pages)
 
     # Pass 3: title searches
     for term, pages in [
@@ -730,6 +747,21 @@ def deduplicate_and_rank(opps: list) -> list:
     return out
 
 
+def dedupe_only(opps: list) -> list:
+    """Same expiry filtering + de-dup as deduplicate_and_rank, WITHOUT the
+    score>0 filter. Use this for feeds that should show regardless of
+    capability fit — e.g. Industry Days, which are often generic/multi-topic
+    events with no product-capability match but real BD/networking value."""
+    seen, out = set(), []
+    for o in sorted(opps, key=lambda x: x.score, reverse=True):
+        if is_expired(o): continue
+        key = o.notice_id or o.title[:60].lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(o)
+    return out
+
+
 # ---- "Different from yesterday's run" tracking -------------------------
 # Persisted as a single snapshot of the previous run's notice IDs (committed
 # back to the repo each run, same pattern as keep_alive.yml) — overwritten
@@ -874,9 +906,17 @@ def build_new_today_html(new_today: list) -> str:
             f'{rows}</div>')
 
 
+INDUSTRY_DAY_TERMS = [
+    "industry day", "vendor day", "industry engagement",
+    "pre-proposal conference", "virtual industry day",
+    "capability briefing", "networking event", "industry open house",
+    "vendor outreach session", "vendor conference",
+]
+
+
 def build_industry_days_html(opps: list) -> str:
     days = [o for o in opps
-            if "industry day" in o.title.lower()
+            if any(t in o.title.lower() for t in INDUSTRY_DAY_TERMS)
             and o.source != "Events Intelligence"]
     days.sort(key=lambda x: x.posted_date, reverse=True)
     if not days:
@@ -901,6 +941,93 @@ def build_industry_days_html(opps: list) -> str:
             f'padding-bottom:5px;">&#x1F4E3; Industry Days ({len(days)})</h2>'
             f'<p style="font-size:12px;color:#888;margin:0 0 8px;">'
             f'All federal agency Industry Day notices.</p>{rows}</div>')
+
+
+# Recurring conferences/events across Peregrine's target verticals (law
+# enforcement, corrections, intel, cyber, border security, and federal
+# program-integrity/fraud). This is the curated core of the Events section;
+# fetch_bd_events() supplements it with live discovery of anything not on
+# this list. Edit freely — add/remove conferences as BD priorities shift.
+CURATED_BD_CONFERENCES = [
+    "IACP Annual Conference",
+    "ASIS GSX Global Security Exchange",
+    "GEOINT Symposium",
+    "AFCEA TechNet Cyber",
+    "Billington Cybersecurity Summit",
+    "Border Security Expo",
+    "DoDIIS Worldwide Conference",
+    "National Sheriffs Association Annual Conference",
+    "American Correctional Association Congress of Correction",
+    "American Probation and Parole Association Training Institute",
+    "National Fusion Center Association Training Event",
+    "ACT-IAC Imagine Nation ELC",
+    "National Health Care Anti-Fraud Association Annual Training Conference",
+    "Esri Federal GIS Conference",
+]
+
+# Broad discovery queries to catch conferences/events NOT on the curated
+# list above — new or niche events the curated list doesn't yet know about.
+BD_EVENT_DISCOVERY_QUERIES = [
+    "law enforcement technology conference",
+    "public safety summit government",
+    "federal government technology conference",
+    "criminal justice technology summit",
+    "intelligence community conference",
+    "corrections technology conference",
+]
+
+
+def fetch_bd_events() -> list:
+    """Conferences/events Peregrine's BD team should know about: a curated
+    core list (watched by name via Google News) plus live discovery queries
+    for anything new. Each item is tagged curated=True/False so the email
+    can group them separately."""
+    items, seen = [], set()
+
+    def _collect(query: str, conference: str, curated: bool, max_items: int = 2, window_days: int = 45):
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+        try:
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0",
+                                           "Accept": "application/rss+xml"}, timeout=15)
+            if r.status_code != 200: return
+            root = ET.fromstring(r.content)
+            count = 0
+            for item in root.findall(".//item"):
+                if count >= max_items: break
+                t = item.find("title"); l = item.find("link")
+                d = item.find("description"); p = item.find("pubDate")
+                title = (t.text or "").strip() if t is not None else ""
+                desc  = unescape(re.sub(r"<[^>]+>","", (d.text or ""))).strip() if d is not None else ""
+                url_  = (l.text or "").strip() if l is not None else ""
+                date_ = (p.text or "").strip() if p is not None else ""
+                if not title or title in seen: continue
+                if date_:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        pub = parsedate_to_datetime(date_).replace(tzinfo=None)
+                        if (datetime.utcnow() - pub).days > window_days: continue
+                    except Exception:
+                        continue
+                seen.add(title)
+                items.append({"conference": conference, "title": title,
+                              "url": clean_url(url_), "source": "Google News",
+                              "date": date_[:16], "summary": desc[:250],
+                              "curated": curated})
+                count += 1
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"[BD Events] {conference or query}: {e}")
+
+    for conf in CURATED_BD_CONFERENCES:
+        _collect(conf.replace(" ", "+"), conf, curated=True)
+
+    for q in BD_EVENT_DISCOVERY_QUERIES:
+        _collect(q.replace(" ", "+"), None, curated=False)
+
+    n_curated = sum(1 for i in items if i["curated"])
+    n_disc    = len(items) - n_curated
+    print(f"[BD Events] {len(items)} items ({n_curated} curated, {n_disc} discovered)")
+    return items
 
 
 def build_competitor_html(items: list) -> str:
@@ -937,6 +1064,67 @@ def build_competitor_html(items: list) -> str:
             f'{rows}</div>')
 
 
+def build_bd_events_html(items: list) -> str:
+    if not items:
+        return ""
+    from collections import defaultdict
+    curated    = [i for i in items if i.get("curated")]
+    discovered = [i for i in items if not i.get("curated")]
+
+    grouped = defaultdict(list)
+    for item in curated:
+        grouped[item["conference"]].append(item)
+
+    rows = ""
+    for conf in sorted(grouped.keys()):
+        sh = ""
+        for s in grouped[conf][:2]:
+            link = (f'<a href="{s["url"]}" style="color:#0057b8;font-weight:600;">'
+                    f'{s["title"][:90]}</a>'
+                    if s.get("url") else
+                    f'<b>{s["title"][:90]}</b>')
+            sh += (f'<div style="margin-bottom:8px;padding-bottom:8px;'
+                   f'border-bottom:1px solid #f0f0f0;">'
+                   f'<div style="font-size:13px;">{link}</div>'
+                   f'<div style="font-size:11px;color:#888;">'
+                   f'{s["source"]} &middot; {s["date"][:10]}</div>'
+                   + (f'<div style="font-size:12px;color:#555;margin-top:2px;">'
+                      f'{s.get("summary","")[:200]}</div>' if s.get("summary") else "")
+                   + '</div>')
+        rows += (f'<div style="margin-bottom:14px;">'
+                 f'<div style="font-weight:700;font-size:12px;color:#555;'
+                 f'margin-bottom:5px;text-transform:uppercase;">&#x1F4C5; {conf}</div>'
+                 f'{sh}</div>')
+
+    discovered_html = ""
+    if discovered:
+        dh = ""
+        for s in discovered[:8]:
+            link = (f'<a href="{s["url"]}" style="color:#0057b8;font-weight:600;">'
+                    f'{s["title"][:100]}</a>'
+                    if s.get("url") else
+                    f'<b>{s["title"][:100]}</b>')
+            dh += (f'<div style="margin-bottom:8px;padding-bottom:8px;'
+                   f'border-bottom:1px solid #f0f0f0;">'
+                   f'<div style="font-size:13px;">{link}</div>'
+                   f'<div style="font-size:11px;color:#888;">{s["date"][:10]}</div>'
+                   + (f'<div style="font-size:12px;color:#555;margin-top:2px;">'
+                      f'{s.get("summary","")[:200]}</div>' if s.get("summary") else "")
+                   + '</div>')
+        discovered_html = (
+            f'<div style="margin-top:6px;">'
+            f'<div style="font-weight:700;font-size:12px;color:#555;'
+            f'margin-bottom:5px;text-transform:uppercase;">&#x1F50D; Other Events Spotted</div>'
+            f'{dh}</div>')
+
+    conf_list = ", ".join(sorted(grouped.keys())) if grouped else "none matched this run"
+    return (f'<div style="margin:20px 0 6px">'
+            f'<h2 style="font-size:16px;color:#222;border-bottom:2px solid #16a085;'
+            f'padding-bottom:5px;">&#x1F4C5; Events Worth Attending ({len(items)})</h2>'
+            f'<p style="font-size:12px;color:#888;margin:0 0 10px;">Tracking: {conf_list}</p>'
+            f'{rows}{discovered_html}</div>')
+
+
 def build_news_html(items: list, title: str) -> str:
     if not items: return ""
     rows = ""
@@ -964,8 +1152,11 @@ def build_news_html(items: list, title: str) -> str:
 
 def build_email(ranked: list, run_date: str, source_counts: dict,
                 competitor_items: list, news_items: list,
-                budget_news: list, new_today: list = None) -> str:
+                budget_news: list, new_today: list = None,
+                all_deduped: list = None, bd_events: list = None) -> str:
     new_today = new_today or []
+    all_deduped = all_deduped if all_deduped is not None else ranked
+    bd_events = bd_events or []
 
     def _k(o): return (o.notice_id or o.title[:60].lower()).strip()
     def _dedup(lst):
@@ -1022,7 +1213,8 @@ def build_email(ranked: list, run_date: str, source_counts: dict,
         + build_competitor_html(competitor_items)
         + build_news_html(budget_news, "&#x1F4E1; Agency Budget &amp; Spending Signals")
         + build_news_html(news_items, "&#x1F4F0; Industry News")
-        + build_industry_days_html(ranked)
+        + build_bd_events_html(bd_events)
+        + build_industry_days_html(all_deduped)
         + '</div></div></body></html>'
     )
 
@@ -1110,6 +1302,7 @@ def main():
 
     print(f"\n[Scoring] Deduplicating {len(all_opps)} raw opportunities...")
     ranked = deduplicate_and_rank(all_opps)
+    all_deduped = dedupe_only(all_opps)  # unfiltered by score — for Industry Days etc.
     ns = sum(1 for o in ranked if o.tier == "Strong")
     ng = sum(1 for o in ranked if o.tier == "Good")
     np = sum(1 for o in ranked if o.tier == "Possible")
@@ -1142,6 +1335,14 @@ def main():
         print(f"[Budget News] FAILED: {e}")
         budget_news = []
 
+    print("\n[BD Events] Fetching...")
+    try:
+        bd_events = fetch_bd_events()
+        source_counts["BD Events"] = len(bd_events)
+    except Exception as e:
+        print(f"[BD Events] FAILED: {e}")
+        bd_events = []
+
     new_prefix = f"{len(new_today)} New · " if new_today else ""
     if ns >= 1:
         subject = f"Peregrine Daily Scanner | {new_prefix}{ns} Strong · {ng} Good · {np} Possible | {today.strftime('%b %d')}"
@@ -1151,7 +1352,8 @@ def main():
         subject = f"Peregrine Daily Scanner | {new_prefix}No Strong Matches | {today.strftime('%b %d')}"
 
     html = build_email(ranked, run_date, source_counts,
-                       competitor_items, news_items, budget_news, new_today)
+                       competitor_items, news_items, budget_news, new_today,
+                       all_deduped, bd_events)
     print(f"\n[Email] HTML: {len(html):,} chars | Subject: {subject}")
     send_email(html, subject)
 
