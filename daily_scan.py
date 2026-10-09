@@ -101,6 +101,15 @@ CAPABILITY_CLUSTERS = [
     ("Ontology & Semantic Modeling", 40, [
         "ontology", "ontologies",
     ]),
+    ("Fraud Detection & Prevention", 40, [
+        "fraud detection", "fraud prevention", "fraud analytics",
+        "fraud signaling", "fraud signal", "anti-fraud",
+        "fraud risk", "fraud risk management",
+        "improper payments", "payment integrity", "benefit fraud",
+        "procurement fraud", "fraud waste and abuse",
+        "fraud, waste, and abuse", "financial crime detection",
+        "false claims", "fraud scheme", "fraud mitigation",
+    ]),
     ("AI & Machine Learning", 22, [
         "artificial intelligence", "machine learning",
         "ai platform", "ai solution", "ai system",
