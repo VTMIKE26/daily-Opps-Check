@@ -164,6 +164,20 @@ HARD_EXCLUSIONS = [
     "turbine engine", "engine overhaul", "technical data package",
     "qualified parts list", "weapons platform", "weapon platform",
     "gas generator", "inertia reel", "gyro spin",
+    # Digital signage / AV / media-player systems (e.g. waiting-room TVs,
+    # building signage) — these bundles routinely mention "software" or
+    # "media player" in passing but are AV/hardware procurements, not
+    # software or data platform opportunities.
+    "digital signage", "media signage", "signage server", "media player",
+    "kiosk system", "video wall", "television server",
+    # "Hardware, Accessories, and Support" is a standard government-
+    # contracting title template for hardware-refresh/support-only buys —
+    # cameras, radios, laptops, whatever. It's a reliable signal that a
+    # notice is a physical-equipment purchase even when the equipment
+    # category (e.g. "body worn camera") is also a capability-cluster
+    # phrase elsewhere, since Peregrine doesn't sell the hardware itself.
+    "hardware, accessories, and support", "body worn camera hardware",
+    "body camera hardware", "camera hardware",
 ]
 
 TIER_STRONG = 40
@@ -260,18 +274,24 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
         # or data-related. Require at least one minimal tech-relevance
         # signal in the text too, so a hardware-only sources-sought notice
         # doesn't clear the bar just for existing at a Tier-1 agency.
-        # Kept deliberately narrower than it might look: standalone words
-        # like "platform", "analytics", "automation", or "cyber" used to be
-        # in this list, but hardware SOWs use those words too ("test
-        # platform", "weapons platform", "manufacturing automation", "cyber
-        # range" hardware). Every entry here is either a multi-word phrase
-        # specific to IT/software/data work, or a word that essentially
-        # never appears in a pure-hardware sources-sought notice.
+        # Kept deliberately narrower than it might look. Standalone words
+        # like "platform", "analytics", "automation", "cyber" — and even
+        # bare "software" — used to be in this list, but a single incidental
+        # mention is weak evidence: hardware bundles routinely include one
+        # throwaway mention of "software" in an equipment list (e.g. "...
+        # signage servers, software, media players...") without being a
+        # software/data opportunity at all. Every entry below is a
+        # multi-word phrase specific to actual IT/software/data work — not
+        # a bare word that could show up anywhere.
         TECH_HINTS = [
-            "information technology", "it modernization", "software",
+            "information technology", "it modernization",
+            "software integration", "software development",
+            "software solution", "software platform",
+            "software modernization", "software engineering",
+            "software application", "software as a service",
             "data management", "data integration", "data analytics",
             "digital transformation", "cybersecurity", "cyber security",
-            "data platform", "analytics platform", "software platform",
+            "data platform", "analytics platform",
             "cloud platform", "digital platform", "cloud computing",
             "artificial intelligence", "machine learning",
             "system modernization", "enterprise system", "database",
