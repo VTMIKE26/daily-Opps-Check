@@ -153,6 +153,17 @@ HARD_EXCLUSIONS = [
     "domestic abuse refuge", "homeless shelter",
     "firearms training", "first aid training", "physical training contract",
     "avionics", "missile", "munitions", "weapons system", "naval vessel",
+    # Military/aerospace hardware, parts & sustainment — these show up
+    # constantly as DoD sources-sought/pre-solicitation notices and used to
+    # slip past scoring via the engagement-event fallback or incidental
+    # boilerplate text. None of these phrases have any legitimate overlap
+    # with a software/data platform notice.
+    "sustaining engineering", "test equipment", "calibration services",
+    "spare parts", "repair parts", "depot maintenance", "aircraft parts",
+    "ground support equipment", "flight test", "propulsion system",
+    "turbine engine", "engine overhaul", "technical data package",
+    "qualified parts list", "weapons platform", "weapon platform",
+    "gas generator", "inertia reel", "gyro spin",
 ]
 
 TIER_STRONG = 40
@@ -249,13 +260,23 @@ def score_opportunity(opp: Opportunity) -> Opportunity:
         # or data-related. Require at least one minimal tech-relevance
         # signal in the text too, so a hardware-only sources-sought notice
         # doesn't clear the bar just for existing at a Tier-1 agency.
+        # Kept deliberately narrower than it might look: standalone words
+        # like "platform", "analytics", "automation", or "cyber" used to be
+        # in this list, but hardware SOWs use those words too ("test
+        # platform", "weapons platform", "manufacturing automation", "cyber
+        # range" hardware). Every entry here is either a multi-word phrase
+        # specific to IT/software/data work, or a word that essentially
+        # never appears in a pure-hardware sources-sought notice.
         TECH_HINTS = [
             "information technology", "it modernization", "software",
             "data management", "data integration", "data analytics",
-            "digital transformation", "cyber", "platform", "analytics",
-            "cloud computing", "artificial intelligence", "machine learning",
-            "automation", "system modernization", "enterprise system",
-            "database", "application development", "technology refresh",
+            "digital transformation", "cybersecurity", "cyber security",
+            "data platform", "analytics platform", "software platform",
+            "cloud platform", "digital platform", "cloud computing",
+            "artificial intelligence", "machine learning",
+            "system modernization", "enterprise system", "database",
+            "application development", "technology refresh",
+            "information system", "business intelligence",
         ]
         full_text = f" {opp.title} {opp.description} ".lower()
         is_eng  = any(s in full_text for s in ENGAGEMENT)
@@ -408,6 +429,24 @@ def fetch_sam_gov() -> list:
         _sam_search({"title": term, "postedFrom": d90, "postedTo": to_date},
                     f"title={term}", seen, results, pages=pages)
 
+    # Pass 3b: fraud / program-integrity / ontology sweep. These capability
+    # clusters were added to the SCORING logic, but scoring only runs on
+    # notices that actually got fetched — without matching search terms
+    # here, a notice like a CMS program-integrity RFI never enters the
+    # candidate pool at all, no matter how well it would have scored.
+    for term, pages in [
+        ("fraud detection", 2), ("fraud prevention", 2),
+        ("program integrity", 2), ("improper payments", 1),
+        ("payment integrity", 1), ("fraud analytics", 1),
+        ("ontology", 1), ("advanced analytics", 2),
+        ("investigative techniques", 1),
+    ]:
+        if _SAM_RATE_LIMITED[0]: break
+        _sam_search({"keyword": term, "postedFrom": d90, "postedTo": to_date},
+                    f"kw={term}", seen, results, pages=pages)
+        _sam_search({"title": term, "postedFrom": d90, "postedTo": to_date},
+                    f"title={term}", seen, results, pages=pages)
+
     # Pass 4: watchlist
     today_str = today.strftime("%m/%d/%Y")
     for nid in [
@@ -526,6 +565,7 @@ OTHER_FRAGS = ["department of treasury","department of the treasury",
                "postal service","postal inspection",
                "veterans affairs","inspector general",
                "health and human services","hhs",
+               "centers for medicare","medicare and medicaid",
                "social security administration",
                "department of labor",
                "department of transportation",
@@ -581,6 +621,7 @@ def fetch_other_agencies() -> list:
         "Office of Inspector General",              # catches many agency-specific OIGs
         "Department of Veterans Affairs",
         "Department of Health and Human Services",
+        "Centers for Medicare and Medicaid Services",
         "Social Security Administration",
         "Department of Labor",
         "Department of Transportation",
@@ -967,13 +1008,28 @@ CURATED_BD_CONFERENCES = [
 
 # Broad discovery queries to catch conferences/events NOT on the curated
 # list above — new or niche events the curated list doesn't yet know about.
+# These are quoted as exact phrases (see fetch_bd_events) so they behave
+# like genuine event names rather than a loose keyword soup that returns
+# any topically-related news story.
 BD_EVENT_DISCOVERY_QUERIES = [
     "law enforcement technology conference",
-    "public safety summit government",
+    "public safety technology summit",
     "federal government technology conference",
-    "criminal justice technology summit",
-    "intelligence community conference",
+    "criminal justice technology conference",
+    "intelligence community symposium",
     "corrections technology conference",
+]
+
+# A result must contain at least one of these before it's accepted as an
+# actual event (vs. a news story that merely mentions a conference's name
+# in passing — e.g. a product-announcement article is not the same as
+# coverage of the event itself).
+EVENT_SIGNAL_KEYWORDS = [
+    "conference", "summit", "symposium", "expo", "exposition", "exhibition",
+    "registration", "agenda", "keynote", "exhibitor", "exhibit hall",
+    "call for papers", "trade show", "training institute", "workshop",
+    "annual meeting", "attendees", "panel discussion", "session track",
+    "convention",
 ]
 
 
@@ -981,11 +1037,18 @@ def fetch_bd_events() -> list:
     """Conferences/events Peregrine's BD team should know about: a curated
     core list (watched by name via Google News) plus live discovery queries
     for anything new. Each item is tagged curated=True/False so the email
-    can group them separately."""
+    can group them separately.
+
+    Queries are sent as exact quoted phrases (not loose keyword-soup) and
+    every result must also contain an event-signal word (conference,
+    summit, registration, keynote, etc.) — otherwise Google News readily
+    returns unrelated stories that just happen to share a word or two with
+    the query, which isn't actually event coverage."""
     items, seen = [], set()
 
-    def _collect(query: str, conference: str, curated: bool, max_items: int = 2, window_days: int = 45):
-        url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+    def _collect(phrase: str, conference: str, curated: bool, max_items: int = 2, window_days: int = 45):
+        quoted = requests.utils.quote(f'"{phrase}"')
+        url = f"https://news.google.com/rss/search?q={quoted}&hl=en-US&gl=US&ceid=US:en"
         try:
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0",
                                            "Accept": "application/rss+xml"}, timeout=15)
@@ -1001,6 +1064,9 @@ def fetch_bd_events() -> list:
                 url_  = (l.text or "").strip() if l is not None else ""
                 date_ = (p.text or "").strip() if p is not None else ""
                 if not title or title in seen: continue
+                combined = f"{title} {desc}".lower()
+                if not any(sig in combined for sig in EVENT_SIGNAL_KEYWORDS):
+                    continue
                 if date_:
                     try:
                         from email.utils import parsedate_to_datetime
@@ -1016,13 +1082,13 @@ def fetch_bd_events() -> list:
                 count += 1
             time.sleep(0.2)
         except Exception as e:
-            print(f"[BD Events] {conference or query}: {e}")
+            print(f"[BD Events] {conference or phrase}: {e}")
 
     for conf in CURATED_BD_CONFERENCES:
-        _collect(conf.replace(" ", "+"), conf, curated=True)
+        _collect(conf, conf, curated=True)
 
     for q in BD_EVENT_DISCOVERY_QUERIES:
-        _collect(q.replace(" ", "+"), None, curated=False)
+        _collect(q, None, curated=False)
 
     n_curated = sum(1 for i in items if i["curated"])
     n_disc    = len(items) - n_curated
