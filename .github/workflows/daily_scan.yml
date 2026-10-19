@@ -1,23 +1,25 @@
 name: Peregrine Daily Federal Scanner
 
 on:
-  # Primary trigger: called by cron-job.org via workflow_dispatch
-  # cron-job.org hits: POST /repos/VTMIKE26/daily-Opps-Check/actions/workflows/daily_scan.yml/dispatches
-  # This fires at EXACTLY 7:00 AM EST/EDT every weekday — no GitHub queue delays
+  # Single trigger: called by cron-job.org via workflow_dispatch, which
+  # hits POST /repos/VTMIKE26/daily-Opps-Check/actions/workflows/daily_scan.yml/dispatches
+  # at EXACTLY 7:00 AM EST/EDT every weekday — no GitHub queue delays.
+  #
+  # NOTE: a "backup" native GitHub cron used to run ~20 min later as a
+  # fallback in case cron-job.org missed a day. It's been removed —
+  # GitHub's schedule trigger has no way to check "did today's dispatch
+  # already run" before firing, so the backup fired unconditionally every
+  # day regardless, producing two separate emails instead of one. If
+  # cron-job.org ever fails to fire, that day's run is simply skipped;
+  # there's currently no automatic fallback.
   workflow_dispatch:
-
-  # Backup: GitHub native cron in case cron-job.org misses a day
-  # Scheduled slightly later (7:20am) so it only runs if dispatch didn't fire
-  schedule:
-    - cron: '20 12 * * 1-5'   # 7:20 AM EST backup (UTC 12:20)
-    - cron: '20 11 * * 1-5'   # 7:20 AM EDT backup (UTC 11:20)
 
 concurrency:
   group: peregrine-daily-scanner
   cancel-in-progress: false
 
 permissions:
-  contents: write   # needed so the "Persist seen-IDs state" step can push seen_ids.json back
+  contents: write   # needed so the "Persist previous-run snapshot" step can push previous_run_ids.json back
 
 jobs:
   daily-scan:
