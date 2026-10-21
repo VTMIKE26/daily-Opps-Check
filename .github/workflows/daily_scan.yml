@@ -1,18 +1,27 @@
 name: Peregrine Daily Federal Scanner
 
 on:
-  # Single trigger: called by cron-job.org via workflow_dispatch, which
-  # hits POST /repos/VTMIKE26/daily-Opps-Check/actions/workflows/daily_scan.yml/dispatches
-  # at EXACTLY 7:00 AM EST/EDT every weekday — no GitHub queue delays.
+  # workflow_dispatch was originally meant to be the primary trigger (fired
+  # by an external cron-job.org call), with the schedule below as a backup.
+  # In practice, the run history shows every actual run came from
+  # `schedule`, never from a `workflow_dispatch` event — the external
+  # trigger does not appear to have ever successfully fired. So schedule is
+  # the real, only-working trigger; workflow_dispatch is kept only so a run
+  # can be started manually from the GitHub UI for testing.
   #
-  # NOTE: a "backup" native GitHub cron used to run ~20 min later as a
-  # fallback in case cron-job.org missed a day. It's been removed —
-  # GitHub's schedule trigger has no way to check "did today's dispatch
-  # already run" before firing, so the backup fired unconditionally every
-  # day regardless, producing two separate emails instead of one. If
-  # cron-job.org ever fails to fire, that day's run is simply skipped;
-  # there's currently no automatic fallback.
+  # Both the EST and EDT cron lines below fire unconditionally, every
+  # weekday, year-round — GitHub Actions cron has no concept of "whichever
+  # one is currently correct for daylight saving." That used to cause two
+  # emails a day, an hour apart. Fixed now via a runtime guard in
+  # daily_scan.py: on a `schedule`-triggered run, the script checks whether
+  # US/Eastern is currently in standard or daylight time and immediately
+  # exits as a no-op unless the run's actual UTC hour matches the
+  # seasonally-correct one. Manual workflow_dispatch runs skip that guard
+  # and always execute fully.
   workflow_dispatch:
+  schedule:
+    - cron: '20 12 * * 1-5'   # 7:20 AM EST (UTC 12:20) — active Nov-Mar
+    - cron: '20 11 * * 1-5'   # 7:20 AM EDT (UTC 11:20) — active Mar-Nov
 
 concurrency:
   group: peregrine-daily-scanner
