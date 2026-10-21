@@ -1361,7 +1361,46 @@ def send_email(html: str, subject: str):
         print("[Email] SKIPPED — no email credentials set")
 
 
+def _should_run_this_schedule_fire() -> bool:
+    """Guard against GitHub Actions' lack of DST awareness: the workflow's
+    two schedule cron lines (one for EST, one for EDT) both fire
+    unconditionally every weekday, year-round — cron has no way to only
+    fire "whichever one is currently correct." Without this guard that
+    produces two runs (and two emails) a day, an hour apart.
+
+    On a schedule-triggered run, only proceed if the current UTC hour
+    matches the one that's actually correct for US/Eastern right now; the
+    other firing that day exits immediately as a no-op. A manual
+    workflow_dispatch run (or local run, where GITHUB_EVENT_NAME isn't set)
+    always proceeds, so testing is never blocked by this guard."""
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    if event_name != "schedule":
+        return True
+
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        print("[Scheduler Guard] zoneinfo unavailable — proceeding (can't verify DST)")
+        return True
+
+    now_utc = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC"))
+    eastern_now = now_utc.astimezone(ZoneInfo("America/New_York"))
+    is_dst = bool(eastern_now.dst())
+    expected_utc_hour = 11 if is_dst else 12  # EDT -> 11:xx UTC, EST -> 12:xx UTC
+    actual_utc_hour = now_utc.hour
+
+    if actual_utc_hour != expected_utc_hour:
+        print(f"[Scheduler Guard] Skipping — this is the redundant DST cron firing "
+              f"(Eastern is currently {'EDT' if is_dst else 'EST'}, expected UTC hour "
+              f"{expected_utc_hour}, this run fired at UTC hour {actual_utc_hour}).")
+        return False
+    return True
+
+
 def main():
+    if not _should_run_this_schedule_fire():
+        return
+
     today    = datetime.utcnow()
     run_date = today.strftime("%B %d, %Y")
     sep = "=" * 60
