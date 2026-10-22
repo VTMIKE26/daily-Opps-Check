@@ -1361,44 +1361,67 @@ def send_email(html: str, subject: str):
         print("[Email] SKIPPED — no email credentials set")
 
 
-def _should_run_this_schedule_fire() -> bool:
-    """Guard against GitHub Actions' lack of DST awareness: the workflow's
-    two schedule cron lines (one for EST, one for EDT) both fire
-    unconditionally every weekday, year-round — cron has no way to only
-    fire "whichever one is currently correct." Without this guard that
-    produces two runs (and two emails) a day, an hour apart.
+LAST_RUN_MARKER_PATH = "last_run_date.txt"
 
-    On a schedule-triggered run, only proceed if the current UTC hour
-    matches the one that's actually correct for US/Eastern right now; the
-    other firing that day exits immediately as a no-op. A manual
-    workflow_dispatch run (or local run, where GITHUB_EVENT_NAME isn't set)
-    always proceeds, so testing is never blocked by this guard."""
+
+def _eastern_today():
+    try:
+        from zoneinfo import ZoneInfo
+        return (datetime.utcnow().replace(tzinfo=ZoneInfo("UTC"))
+                .astimezone(ZoneInfo("America/New_York")).date())
+    except ImportError:
+        return datetime.utcnow().date()  # fallback: close enough
+
+
+def _should_run_today() -> bool:
+    """Guard against the workflow's two DST-season cron lines both firing
+    the same day (one for EST, one for EDT — GitHub Actions cron has no
+    concept of "whichever is currently correct," so both fire unconditionally
+    every weekday year-round).
+
+    This deliberately does NOT try to predict which exact UTC hour is
+    "correct" for the current season — an earlier version of this guard did
+    that, and it's fragile: GitHub's own docs acknowledge scheduled triggers
+    can be delayed, and a delayed-but-genuine firing that drifts past an hour
+    boundary would get wrongly treated as "the wrong one" and skipped,
+    which is worse than the duplicate-email problem it was meant to solve.
+
+    Instead: track whether today (Eastern calendar date) has already had a
+    successful run, via a small committed marker file. This guarantees at
+    most one run per day regardless of how many times the cron fires, how
+    late any single firing is delayed, or which of the two lines actually
+    fires — all without needing to reason about hours at all.
+
+    Manual workflow_dispatch runs always proceed (ignore this guard), so a
+    missed day can always be re-run by hand without a stale marker blocking it."""
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     if event_name != "schedule":
         return True
 
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:
-        print("[Scheduler Guard] zoneinfo unavailable — proceeding (can't verify DST)")
-        return True
-
-    now_utc = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC"))
-    eastern_now = now_utc.astimezone(ZoneInfo("America/New_York"))
-    is_dst = bool(eastern_now.dst())
-    expected_utc_hour = 11 if is_dst else 12  # EDT -> 11:xx UTC, EST -> 12:xx UTC
-    actual_utc_hour = now_utc.hour
-
-    if actual_utc_hour != expected_utc_hour:
-        print(f"[Scheduler Guard] Skipping — this is the redundant DST cron firing "
-              f"(Eastern is currently {'EDT' if is_dst else 'EST'}, expected UTC hour "
-              f"{expected_utc_hour}, this run fired at UTC hour {actual_utc_hour}).")
-        return False
+    if os.path.exists(LAST_RUN_MARKER_PATH):
+        try:
+            with open(LAST_RUN_MARKER_PATH, "r", encoding="utf-8") as f:
+                last_run = f.read().strip()
+            today_str = _eastern_today().isoformat()
+            if last_run == today_str:
+                print(f"[Scheduler Guard] Skipping — already ran today ({today_str}); "
+                      f"this is the redundant DST cron firing (or a delayed duplicate).")
+                return False
+        except OSError as e:
+            print(f"[Scheduler Guard] Could not read {LAST_RUN_MARKER_PATH}: {e} — proceeding")
     return True
 
 
+def _record_run_today() -> None:
+    try:
+        with open(LAST_RUN_MARKER_PATH, "w", encoding="utf-8") as f:
+            f.write(_eastern_today().isoformat())
+    except OSError as e:
+        print(f"[Scheduler Guard] Could not write {LAST_RUN_MARKER_PATH}: {e}")
+
+
 def main():
-    if not _should_run_this_schedule_fire():
+    if not _should_run_today():
         return
 
     today    = datetime.utcnow()
@@ -1481,6 +1504,7 @@ def main():
                        all_deduped, bd_events)
     print(f"\n[Email] HTML: {len(html):,} chars | Subject: {subject}")
     send_email(html, subject)
+    _record_run_today()
 
     fname = f"digest_{today.strftime('%Y%m%d')}.html"
     with open(fname, "w", encoding="utf-8") as f:
