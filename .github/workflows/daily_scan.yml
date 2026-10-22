@@ -7,17 +7,23 @@ on:
   # `schedule`, never from a `workflow_dispatch` event — the external
   # trigger does not appear to have ever successfully fired. So schedule is
   # the real, only-working trigger; workflow_dispatch is kept only so a run
-  # can be started manually from the GitHub UI for testing.
+  # can be started manually from the GitHub UI for testing/backfilling.
   #
   # Both the EST and EDT cron lines below fire unconditionally, every
   # weekday, year-round — GitHub Actions cron has no concept of "whichever
-  # one is currently correct for daylight saving." That used to cause two
-  # emails a day, an hour apart. Fixed now via a runtime guard in
-  # daily_scan.py: on a `schedule`-triggered run, the script checks whether
-  # US/Eastern is currently in standard or daylight time and immediately
-  # exits as a no-op unless the run's actual UTC hour matches the
-  # seasonally-correct one. Manual workflow_dispatch runs skip that guard
-  # and always execute fully.
+  # one is currently correct for daylight saving." Duplicate sends are
+  # prevented in daily_scan.py via a committed "already ran today" marker
+  # (last_run_date.txt), not by trying to predict which exact UTC hour is
+  # correct — that approach is fragile against GitHub's own documented
+  # scheduling delays, where a delayed firing can drift past an hour
+  # boundary and get wrongly treated as "the wrong one."
+  #
+  # NOTE: GitHub's `schedule` trigger is not guaranteed to fire at the exact
+  # time specified, and can occasionally be delayed or silently skipped
+  # during periods of high platform load — this is documented GitHub
+  # behavior, not something fixable from the workflow file itself. If a
+  # morning email doesn't arrive, check the Actions tab for whether a run
+  # appears at all before assuming something in this repo is broken.
   workflow_dispatch:
   schedule:
     - cron: '20 12 * * 1-5'   # 7:20 AM EST (UTC 12:20) — active Nov-Mar
@@ -55,28 +61,27 @@ jobs:
           EMAIL_FROM:       mikefkelly26@gmail.com
         run: python daily_scan.py
 
-      - name: Persist previous-run snapshot
+      - name: Persist previous-run snapshot and last-run marker
         # Commits previous_run_ids.json (the "was this in yesterday's run?"
-        # snapshot behind the New Today section) back to the repo so
-        # tomorrow's run has something to diff against. This file is
-        # OVERWRITTEN each run, not accumulated — it only ever reflects the
-        # single most recent run. if: always() so a partial/failed scan
-        # still saves whatever the script managed to write before it died;
-        # the git diff check below is a no-op if nothing changed.
+        # snapshot behind the New Today section) and last_run_date.txt (the
+        # "did today already send?" duplicate-prevention marker) back to the
+        # repo. Both are OVERWRITTEN each run, not accumulated. if: always()
+        # so a partial/failed scan still saves whatever the script managed
+        # to write before it died; the git diff check below is a no-op if
+        # nothing changed. Note last_run_date.txt is only written by the
+        # script AFTER a successful send, so a crashed run won't falsely
+        # block a same-day retry.
         if: always()
         run: |
-          if [ -f previous_run_ids.json ]; then
-            git config user.name "peregrine-scanner-bot"
-            git config user.email "actions@github.com"
-            git add previous_run_ids.json
-            if ! git diff --cached --quiet; then
-              git commit -m "Update previous_run_ids.json [skip ci]"
-              git push
-            else
-              echo "No change to previous_run_ids.json — skipping commit"
-            fi
+          git config user.name "peregrine-scanner-bot"
+          git config user.email "actions@github.com"
+          [ -f previous_run_ids.json ] && git add previous_run_ids.json
+          [ -f last_run_date.txt ] && git add last_run_date.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "Update scanner state [skip ci]"
+            git push
           else
-            echo "previous_run_ids.json not found — scanner likely failed before writing it"
+            echo "No state changes to commit"
           fi
 
       - name: Upload digest
